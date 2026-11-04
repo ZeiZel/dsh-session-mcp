@@ -138,21 +138,29 @@ The plugin row accepts two options (`cordis.patch.yml`):
 
 ## How it works
 
-- `host/index.js` — Cordis plugin. Reads/creates the bearer, starts the listener, publishes
-  the state file, closes the listener on unload.
-- `host/server.js` — `node:http` listener with the bearer gate in front of the official
-  SDK's `createMcpHandler` + `toNodeHandler`.
-- `host/tools.js` — the five tools, backed directly by `ctx.sessionController`.
-- `host/config.js` — token persistence, constant-time bearer comparison, client snippet.
+Written in TypeScript, compiled to `dist/` (committed, so installs need no build step).
+
+| Source | Role |
+|---|---|
+| `src/index.ts` | Cordis plugin: reads/creates the bearer, starts the listener, publishes the state file, closes the listener on unload |
+| `src/server.ts` | `node:http` listener with the bearer gate in front of the official SDK's `createMcpHandler` + `toNodeHandler` |
+| `src/tools.ts` | The five tools, backed directly by `ctx.sessionController` |
+| `src/config.ts` | Token persistence, constant-time bearer comparison, client snippet |
+| `src/types.ts` | The narrow structural slice of Harness types this package needs |
 
 ## Development
 
 ```bash
 bun install
-node --check host/*.js
+bun run typecheck   # tsc --noEmit
+bun run build       # tsc -> dist/
 ```
 
-Requires Node ≥ 20. Dependencies: `@modelcontextprotocol/server`, `@modelcontextprotocol/node`, `zod`.
+Requires Node ≥ 20. Runtime dependencies: `@modelcontextprotocol/server`,
+`@modelcontextprotocol/node`, `zod`. Dev: `typescript`, `@types/node`.
+
+`dist/` is committed so `bun add github:ZeiZel/dsh-session-mcp` and
+`dsh plugin add <dir>` work without a build step; `prepublishOnly` rebuilds it for npm.
 
 ## License
 

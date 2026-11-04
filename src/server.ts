@@ -9,11 +9,13 @@
  *
  * @module dsh-session-mcp/server
  */
-import { createServer } from 'node:http'
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { toNodeHandler } from '@modelcontextprotocol/node'
 import { createMcpHandler, McpServer } from '@modelcontextprotocol/server'
 import { bearerMatches, SERVER_NAME } from './config.js'
 import { registerTools } from './tools.js'
+import type { PluginLogger, SessionController } from './types.js'
 
 /** Path the MCP endpoint answers on. */
 export const MCP_PATH = '/mcp'
@@ -21,13 +23,30 @@ export const MCP_PATH = '/mcp'
 /** Loopback hostnames accepted in the Host header. */
 const LOOPBACK = new Set(['127.0.0.1', '::1', 'localhost', '[::1]'])
 
+/** A running endpoint. */
+export interface RunningEndpoint {
+  readonly url: string
+  readonly port: number
+  close(): Promise<void>
+}
+
+/** Options accepted by {@link startEndpoint}. */
+export interface StartEndpointOptions {
+  readonly controller: SessionController
+  readonly token: string
+  readonly host: string
+  readonly port: number
+  readonly version: string
+  readonly logger?: PluginLogger | undefined
+}
+
 /**
  * Build the web-standard MCP handler for one session controller.
  * @param controller - Harness `sessionController` service.
  * @param version - advertised server version.
  * @returns an object exposing `fetch(Request)`.
  */
-export function buildMcpHandler(controller, version) {
+export function buildMcpHandler(controller: SessionController, version: string) {
   return createMcpHandler(() => {
     const server = new McpServer({ name: SERVER_NAME, version })
     registerTools(server, controller)
@@ -40,7 +59,7 @@ export function buildMcpHandler(controller, version) {
  * @param req - incoming request.
  * @returns false for anything that is not loopback.
  */
-function hostIsLoopback(req) {
+function hostIsLoopback(req: IncomingMessage): boolean {
   const header = req.headers.host
   if (typeof header !== 'string') return false
   const name = header.replace(/:\d+$/u, '')
@@ -54,7 +73,7 @@ function hostIsLoopback(req) {
  * @param body - JSON-serializable body.
  * @param headers - extra headers.
  */
-function json(res, status, body, headers = {}) {
+function json(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
   const payload = JSON.stringify(body)
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
@@ -70,30 +89,35 @@ function json(res, status, body, headers = {}) {
  * @param server - node http server.
  * @param port - preferred port, `0` for ephemeral.
  * @param host - bind address.
- * @returns the bound port.
+ * @returns the bound port and whether the fallback ran.
  */
-async function bind(server, port, host) {
-  const attempt = (wanted) => new Promise((resolve, reject) => {
-    const onError = (error) => {
-      server.off('listening', onListening)
-      reject(error)
-    }
-    const onListening = () => {
-      server.off('error', onError)
-      resolve(server.address())
-    }
-    server.once('error', onError)
-    server.once('listening', onListening)
-    server.listen(wanted, host)
-  })
+async function bind(server: Server, port: number, host: string): Promise<{ port: number; fellBack: boolean }> {
+  const attempt = (wanted: number): Promise<number> =>
+    new Promise((resolve, reject) => {
+      const onError = (error: Error): void => {
+        server.off('listening', onListening)
+        reject(error)
+      }
+      const onListening = (): void => {
+        server.off('error', onError)
+        const address = server.address()
+        if (address === null || typeof address === 'string') {
+          reject(new Error('dsh-session-mcp: the listener bound without an address'))
+          return
+        }
+        resolve((address as AddressInfo).port)
+      }
+      server.once('error', onError)
+      server.once('listening', onListening)
+      server.listen(wanted, host)
+    })
 
   try {
-    const address = await attempt(port)
-    return { port: address.port, fellBack: false }
+    return { port: await attempt(port), fellBack: false }
   } catch (error) {
-    if (port === 0 || error?.code !== 'EADDRINUSE') throw error
-    const address = await attempt(0)
-    return { port: address.port, fellBack: true }
+    const code = (error as { code?: string } | null)?.code
+    if (port === 0 || code !== 'EADDRINUSE') throw error
+    return { port: await attempt(0), fellBack: true }
   }
 }
 
@@ -102,17 +126,17 @@ async function bind(server, port, host) {
  * @param options - controller, token, host, port, version, logger.
  * @returns the resolved endpoint plus a disposer.
  */
-export async function startEndpoint(options) {
+export async function startEndpoint(options: StartEndpointOptions): Promise<RunningEndpoint> {
   const { controller, token, host, port, version, logger } = options
   const handler = buildMcpHandler(controller, version)
   const nodeHandler = toNodeHandler(handler)
 
   const server = createServer((req, res) => {
-    if (hostIsLoopback(req) === false) {
+    if (!hostIsLoopback(req)) {
       json(res, 403, { error: 'forbidden', message: 'this endpoint accepts loopback hosts only' })
       return
     }
-    if (bearerMatches(token, req.headers.authorization) === false) {
+    if (!bearerMatches(token, req.headers.authorization)) {
       json(
         res,
         401,
@@ -126,7 +150,7 @@ export async function startEndpoint(options) {
       json(res, 404, { error: 'not_found', message: `the MCP endpoint lives at ${MCP_PATH}` })
       return
     }
-    nodeHandler(req, res)
+    void nodeHandler(req, res)
   })
 
   const bound = await bind(server, port, host)
@@ -139,8 +163,8 @@ export async function startEndpoint(options) {
   return {
     url,
     port: bound.port,
-    async close() {
-      await new Promise((resolve) => {
+    async close(): Promise<void> {
+      await new Promise<void>((resolve) => {
         server.close(() => resolve())
         server.closeAllConnections?.()
       })

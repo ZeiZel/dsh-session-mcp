@@ -21,33 +21,53 @@ import {
   readState,
   SERVER_NAME,
   writeState,
+  type EndpointState,
 } from './config.js'
 import { startEndpoint } from './server.js'
+import type { PluginContext } from './types.js'
 
 /** Stable Cordis plugin name. */
 export const name = 'dsh-session-mcp'
 
 /** The session controller is the only capability this plugin needs. */
-export const inject = ['sessionController']
+export const inject = ['sessionController'] as const
 
-/** Read this package's version without assuming a checkout layout. */
-function packageVersion() {
+/** Row configuration accepted by the bundle patch. */
+export interface Config {
+  /** Preferred loopback port; an ephemeral one is used when it is taken. */
+  readonly port?: number
+  /** Bind address. Defaults to `127.0.0.1`. */
+  readonly host?: string
+}
+
+/**
+ * Read this package's version without assuming a checkout layout.
+ * @returns the `version` field of the package manifest.
+ */
+function packageVersion(): string {
   try {
-    return JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version ?? '0.0.0'
+    const manifest: unknown = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+    if (manifest !== null && typeof manifest === 'object') {
+      const version = (manifest as { version?: unknown }).version
+      if (typeof version === 'string') return version
+    }
   } catch {
-    return '0.0.0'
+    /* A missing manifest only affects the advertised version string. */
   }
+  return '0.0.0'
 }
 
 /**
  * Resolve the row config with defaults and type checks.
  * @param config - raw Loader row config.
- * @returns `{ port, host }`.
+ * @returns the effective `{ port, host }`.
  */
-function settingsOf(config) {
-  const port = Number.isInteger(config?.port) ? config.port : DEFAULT_PORT
-  if (port < 0 || port > 65535) throw new RangeError(`dsh-session-mcp: port ${port} is out of range`)
-  const host = typeof config?.host === 'string' && config.host.length > 0 ? config.host : DEFAULT_HOST
+function settingsOf(config: Config | undefined): { port: number; host: string } {
+  const port = config?.port ?? DEFAULT_PORT
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    throw new RangeError(`dsh-session-mcp: port ${String(port)} is out of range`)
+  }
+  const host = config?.host !== undefined && config.host.length > 0 ? config.host : DEFAULT_HOST
   return { port, host }
 }
 
@@ -56,7 +76,7 @@ function settingsOf(config) {
  * @param ctx - Host context carrying `sessionController`.
  * @param config - Loader row config: `{ port?, host? }`.
  */
-export async function apply(ctx, config) {
+export async function apply(ctx: PluginContext, config?: Config): Promise<void> {
   const { port, host } = settingsOf(config)
   const version = packageVersion()
 
@@ -73,7 +93,7 @@ export async function apply(ctx, config) {
     logger: ctx.logger,
   })
 
-  const state = {
+  const state: EndpointState = {
     version: 1,
     name: SERVER_NAME,
     url: endpoint.url,
@@ -86,12 +106,11 @@ export async function apply(ctx, config) {
   }
 
   const file = writeState(state)
-  const snippet = JSON.stringify(state.client, null, 2)
 
   ctx.logger?.info?.(`dsh-session-mcp: MCP endpoint listening at ${endpoint.url}`)
   ctx.logger?.info?.(`dsh-session-mcp: bearer token and client config in ${file}`)
   console.log(`dsh-session-mcp: ${endpoint.url} (bearer in ${file})`)
-  console.log(snippet)
+  console.log(JSON.stringify(state.client, null, 2))
 
   ctx.effect(
     () => () => {

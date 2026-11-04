@@ -25,11 +25,42 @@ export const SERVER_NAME = 'dsh-session-mcp'
 /** Key used in generated client configuration snippets. */
 export const CLIENT_KEY = 'dsh-sessions'
 
+/** One `mcpServers` entry as most MCP clients accept it. */
+export interface ClientEntry {
+  readonly type: 'http'
+  readonly url: string
+  readonly headers: { readonly Authorization: string }
+}
+
+/** The copy-paste fragment written to the endpoint file. */
+export interface ClientConfig {
+  readonly mcpServers: Record<string, ClientEntry>
+}
+
+/** Persisted endpoint state. */
+export interface EndpointState {
+  readonly version: 1
+  readonly name: string
+  readonly url: string
+  readonly host: string
+  readonly port: number
+  readonly token: string
+  readonly createdAt: string
+  readonly updatedAt: string
+  readonly client: ClientConfig
+}
+
+/** The subset of stored state read back on restart. */
+export interface StoredState {
+  readonly token: string
+  readonly createdAt?: string
+}
+
 /**
  * Resolve `$DSH_HOME` the way the launcher does.
  * @returns absolute Harness home.
  */
-export function dshHome() {
+export function dshHome(): string {
   const fromEnv = process.env.DSH_HOME
   if (typeof fromEnv === 'string' && fromEnv.length > 0) return fromEnv
   return join(homedir(), '.dsh')
@@ -39,12 +70,15 @@ export function dshHome() {
  * Absolute path of the endpoint state file.
  * @returns the file the server writes and clients read.
  */
-export function stateFile() {
+export function stateFile(): string {
   return join(dshHome(), 'state', 'dsh-session-mcp.json')
 }
 
-/** Create a fresh opaque bearer token. */
-export function createToken() {
+/**
+ * Create a fresh opaque bearer token.
+ * @returns 32 random bytes, base64url encoded.
+ */
+export function createToken(): string {
   return randomBytes(32).toString('base64url')
 }
 
@@ -52,11 +86,16 @@ export function createToken() {
  * Read the persisted endpoint state, if any.
  * @returns the stored state, or `undefined` when absent or unreadable.
  */
-export function readState() {
+export function readState(): StoredState | undefined {
   try {
-    const parsed = JSON.parse(readFileSync(stateFile(), 'utf8'))
-    if (typeof parsed?.token !== 'string' || parsed.token.length < 16) return undefined
-    return parsed
+    const parsed: unknown = JSON.parse(readFileSync(stateFile(), 'utf8'))
+    if (parsed === null || typeof parsed !== 'object') return undefined
+    const candidate = parsed as Partial<EndpointState>
+    if (typeof candidate.token !== 'string' || candidate.token.length < 16) return undefined
+    return {
+      token: candidate.token,
+      ...(typeof candidate.createdAt === 'string' ? { createdAt: candidate.createdAt } : {}),
+    }
   } catch {
     return undefined
   }
@@ -64,11 +103,11 @@ export function readState() {
 
 /**
  * Persist the endpoint state with owner-only permissions.
- * @param state - `{ token, url, port, host, createdAt, updatedAt }`.
+ * @param state - resolved endpoint facts and the client snippet.
+ * @returns the file path written.
  */
-export function writeState(state) {
-  const dir = join(dshHome(), 'state')
-  mkdirSync(dir, { recursive: true })
+export function writeState(state: EndpointState): string {
+  mkdirSync(join(dshHome(), 'state'), { recursive: true })
   const file = stateFile()
   writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
   try {
@@ -85,11 +124,13 @@ export function writeState(state) {
  * @param header - the raw `Authorization` header value.
  * @returns true only for exactly `Bearer <expected>`.
  */
-export function bearerMatches(expected, header) {
+export function bearerMatches(expected: string, header: string | undefined): boolean {
   if (typeof header !== 'string') return false
   const match = /^Bearer\s+(\S+)$/iu.exec(header.trim())
   if (match === null) return false
-  const actual = Buffer.from(match[1], 'utf8')
+  const presented = match[1]
+  if (presented === undefined) return false
+  const actual = Buffer.from(presented, 'utf8')
   const wanted = Buffer.from(expected, 'utf8')
   if (actual.byteLength !== wanted.byteLength) return false
   return timingSafeEqual(actual, wanted)
@@ -101,7 +142,7 @@ export function bearerMatches(expected, header) {
  * @param token - bearer token.
  * @returns an `mcpServers` fragment accepted by most MCP clients.
  */
-export function clientConfig(url, token) {
+export function clientConfig(url: string, token: string): ClientConfig {
   return {
     mcpServers: {
       [CLIENT_KEY]: {
