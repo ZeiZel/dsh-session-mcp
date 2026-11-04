@@ -1,12 +1,12 @@
 /**
  * dsh-session-mcp — Client half.
  *
- * Registers the MCP settings page: live status, the last few requests, the
- * endpoint, the bearer token, and copy-ready configuration blocks for every
- * client this harness can serve.
+ * Registers the DeepSeek MCP settings page: live status, the last few requests,
+ * the endpoint with its port and bearer token (both editable), and copy-ready
+ * configuration blocks for every client this harness can serve.
  *
- * The page reads the config over the authenticated `/api` channel, so the token
- * never appears in the served HTML.
+ * The page reads and mutates the config over the authenticated `/api` channel,
+ * so the token never appears in the served HTML.
  *
  * This file is a classic script on purpose: the Web shell loads it through
  * `window.__ModuleLoader__`, and React arrives from the browser module table.
@@ -27,13 +27,15 @@
 
     /** Where the Host publishes the live config, status and request journal. */
     const CONFIG_URL = '/api/dsh-session-mcp/config'
+    const PORT_URL = '/api/dsh-session-mcp/port'
+    const TOKEN_URL = '/api/dsh-session-mcp/token'
 
     /** How often the page refreshes while open. */
     const REFRESH_MS = 10000
 
     const EN: Record<string, string> = {
-      title: 'MCP',
-      heading: 'MCP endpoint',
+      title: 'DeepSeek MCP',
+      heading: 'DeepSeek MCP',
       description:
         'Connect Claude Code, Codex, Cursor or any other MCP client to this harness. The endpoint starts together with the harness and requires the bearer token below.',
       statusTitle: 'Status',
@@ -47,17 +49,27 @@
       colTool: 'Request',
       colSession: 'Conversation',
       colResult: 'Result',
+      connectionTitle: 'Connection',
       endpoint: 'Endpoint',
+      port: 'Port',
+      apply: 'Apply',
+      applying: 'Applying…',
       bearer: 'Bearer token',
       show: 'Show',
       hide: 'Hide',
       copy: 'Copy',
       copied: 'Copied',
+      rotate: 'Rotate token',
+      confirmRotate: 'Rotate now',
+      cancel: 'Cancel',
+      portChanged: 'Listening on the new port. Update your client config.',
+      tokenRotated: 'Token rotated. Every connected client needs the new one.',
+      invalidPort: 'Port must be an integer between 1 and 65535.',
       jsonTitle: 'JSON — mcpServers',
       codexTitle: 'Codex — ~/.codex/config.toml',
       claudeTitle: 'Claude Code — CLI',
       note:
-        'Paste any block into your client. The token is stable across restarts; it rotates only when you delete $DSH_HOME/state/dsh-session-mcp.json and restart the harness.',
+        'Paste any block into your client. Both the port and the token persist across restarts; changing either breaks the configs already pasted elsewhere.',
       loading: 'Loading…',
       error: 'Could not read the endpoint config: ',
       noSession: '—',
@@ -65,8 +77,8 @@
     }
 
     const RU: Record<string, string> = {
-      title: 'MCP',
-      heading: 'MCP-эндпоинт',
+      title: 'DeepSeek MCP',
+      heading: 'DeepSeek MCP',
       description:
         'Подключите Claude Code, Codex, Cursor или любой другой MCP-клиент к этому харнесу. Эндпоинт поднимается вместе с харнесом и требует Bearer-токен ниже.',
       statusTitle: 'Статус',
@@ -80,17 +92,27 @@
       colTool: 'Запрос',
       colSession: 'Сессия',
       colResult: 'Результат',
+      connectionTitle: 'Подключение',
       endpoint: 'Эндпоинт',
+      port: 'Порт',
+      apply: 'Применить',
+      applying: 'Применяем…',
       bearer: 'Bearer-токен',
       show: 'Показать',
       hide: 'Скрыть',
       copy: 'Копировать',
       copied: 'Скопировано',
+      rotate: 'Обновить токен',
+      confirmRotate: 'Точно обновить',
+      cancel: 'Отмена',
+      portChanged: 'Слушает на новом порту. Обновите конфиг клиента.',
+      tokenRotated: 'Токен обновлён. Всем подключённым клиентам нужен новый.',
+      invalidPort: 'Порт должен быть целым числом от 1 до 65535.',
       jsonTitle: 'JSON — mcpServers',
       codexTitle: 'Codex — ~/.codex/config.toml',
       claudeTitle: 'Claude Code — CLI',
       note:
-        'Вставьте любой блок в свой клиент. Токен не меняется между перезапусками; он обновится только если удалить $DSH_HOME/state/dsh-session-mcp.json и перезапустить харнес.',
+        'Вставьте любой блок в свой клиент. Порт и токен сохраняются между перезапусками; изменение любого из них ломает уже вставленные конфиги.',
       loading: 'Загрузка…',
       error: 'Не удалось прочитать конфиг эндпоинта: ',
       noSession: '—',
@@ -138,7 +160,7 @@
         flex: '1 1 auto',
         textAlign: 'right',
       },
-      actions: { display: 'flex', gap: '6px', flex: '0 0 auto' },
+      actions: { display: 'flex', gap: '6px', flex: '0 0 auto', alignItems: 'center' },
       button: {
         font: 'inherit',
         fontSize: '12px',
@@ -148,6 +170,29 @@
         background: 'var(--dsw-alias-bg-layer-2)',
         color: 'var(--dsw-alias-label-primary)',
         cursor: 'pointer',
+      },
+      buttonDanger: {
+        font: 'inherit',
+        fontSize: '12px',
+        padding: '3px 10px',
+        borderRadius: '8px',
+        border: '1px solid var(--dsw-alias-state-error-primary)',
+        background: 'var(--dsw-alias-bg-layer-2)',
+        color: 'var(--dsw-alias-state-error-primary)',
+        cursor: 'pointer',
+      },
+      buttonDisabled: { opacity: 0.6, cursor: 'default' },
+      input: {
+        font: 'inherit',
+        fontSize: '12px',
+        width: '86px',
+        padding: '3px 8px',
+        borderRadius: '8px',
+        border: '1px solid var(--dsw-alias-border-l2)',
+        background: 'var(--dsw-alias-bg-layer-2)',
+        color: 'var(--dsw-alias-label-primary)',
+        textAlign: 'right',
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
       },
       pillOk: {
         display: 'inline-block',
@@ -198,6 +243,8 @@
       },
       note: { margin: 0, color: 'var(--dsw-alias-label-secondary)', fontSize: '12px' },
       error: { margin: 0, color: 'var(--dsw-alias-state-error-primary)' },
+      feedbackOk: { margin: 0, color: 'var(--dsw-alias-state-success-primary)', fontSize: '12px' },
+      feedbackError: { margin: 0, color: 'var(--dsw-alias-state-error-primary)', fontSize: '12px' },
     }
 
     /** `45s`, `12m 3s`, `1h 12m`. */
@@ -321,7 +368,11 @@
                 { style: styles.td },
                 entry.sessionId === null
                   ? h('span', { style: styles.muted }, t('noSession'))
-                  : h('span', { title: String(entry.sessionId) }, String(entry.sessionTitle ?? `${String(entry.sessionId).slice(0, 14)}…`)),
+                  : h(
+                      'span',
+                      { title: String(entry.sessionId) },
+                      String(entry.sessionTitle ?? `${String(entry.sessionId).slice(0, 14)}…`),
+                    ),
               ),
               h(
                 'td',
@@ -356,10 +407,172 @@
           )
         }
 
+        function ConnectionCard(props: { data: any; onPayload: (data: any) => void }): any {
+          const data = props.data
+          const [revealed, setRevealed] = React.useState(false)
+          const [port, setPort] = React.useState(String(data.port))
+          const [busy, setBusy] = React.useState('')
+          const [confirming, setConfirming] = React.useState(false)
+          const [feedback, setFeedback] = React.useState(null)
+
+          React.useEffect(() => {
+            setPort(String(data.port))
+          }, [data.port])
+
+          const call = React.useCallback(
+            (url: string, body: any, successKey: string): void => {
+              setBusy(url)
+              setFeedback(null)
+              g.fetch(url, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'content-type': 'application/json', accept: 'application/json' },
+                body: JSON.stringify(body ?? {}),
+              })
+                .then((response: any) =>
+                  response.json().then((payload: any) => ({ ok: response.ok, payload })),
+                )
+                .then((result: any) => {
+                  if (result.ok) {
+                    props.onPayload(result.payload)
+                    setFeedback({ kind: 'ok', text: t(successKey) })
+                  } else {
+                    setFeedback({ kind: 'error', text: String(result.payload?.message ?? 'request failed') })
+                  }
+                })
+                .catch((error: any) => {
+                  setFeedback({ kind: 'error', text: String(error?.message ?? error) })
+                })
+                .finally(() => setBusy(''))
+            },
+            [props],
+          )
+
+          const applyPort = (): void => {
+            const parsed = Number(port)
+            if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+              setFeedback({ kind: 'error', text: t('invalidPort') })
+              return
+            }
+            call(PORT_URL, { port: parsed }, 'portChanged')
+          }
+
+          const rotate = (): void => {
+            setConfirming(false)
+            call(TOKEN_URL, {}, 'tokenRotated')
+          }
+
+          const token = String(data.token)
+          const masked = `${token.slice(0, 6)}…${token.slice(-4)}`
+          const applying = busy === PORT_URL
+          const rotating = busy === TOKEN_URL
+
+          return h(
+            'section',
+            { style: styles.card },
+            h(
+              'div',
+              { style: styles.cardHead },
+              h('span', { style: styles.cardTitle }, t('connectionTitle')),
+              h('span', { style: styles.muted }, `${data.host}`),
+            ),
+            h(
+              'div',
+              { style: styles.row },
+              h('span', { style: styles.rowLabel }, t('endpoint')),
+              h('span', { style: styles.rowValue }, data.url),
+              h('div', { style: styles.actions }, h(CopyButton, { text: data.url })),
+            ),
+            h(
+              'div',
+              { style: styles.row },
+              h('span', { style: styles.rowLabel }, t('port')),
+              h(
+                'div',
+                { style: styles.actions },
+                h('input', {
+                  type: 'number',
+                  min: 1,
+                  max: 65535,
+                  value: port,
+                  style: styles.input,
+                  onChange: (event: any) => setPort(event.target.value),
+                  onKeyDown: (event: any) => {
+                    if (event.key === 'Enter') applyPort()
+                  },
+                }),
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    style: applying ? { ...styles.button, ...styles.buttonDisabled } : styles.button,
+                    disabled: applying,
+                    onClick: applyPort,
+                  },
+                  applying ? t('applying') : t('apply'),
+                ),
+              ),
+            ),
+            h(
+              'div',
+              { style: styles.row },
+              h('span', { style: styles.rowLabel }, t('bearer')),
+              h('span', { style: styles.rowValue }, revealed ? token : masked),
+              h(
+                'div',
+                { style: styles.actions },
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    style: styles.button,
+                    onClick: () => setRevealed((value: boolean) => !value),
+                  },
+                  revealed ? t('hide') : t('show'),
+                ),
+                h(CopyButton, { text: token }),
+                confirming
+                  ? h(
+                      'button',
+                      {
+                        type: 'button',
+                        style: rotating ? { ...styles.buttonDanger, ...styles.buttonDisabled } : styles.buttonDanger,
+                        disabled: rotating,
+                        onClick: rotate,
+                      },
+                      t('confirmRotate'),
+                    )
+                  : h(
+                      'button',
+                      {
+                        type: 'button',
+                        style: styles.button,
+                        onClick: () => setConfirming(true),
+                      },
+                      t('rotate'),
+                    ),
+                confirming
+                  ? h(
+                      'button',
+                      { type: 'button', style: styles.button, onClick: () => setConfirming(false) },
+                      t('cancel'),
+                    )
+                  : null,
+              ),
+            ),
+            feedback === null
+              ? null
+              : h(
+                  'p',
+                  { style: feedback.kind === 'ok' ? styles.feedbackOk : styles.feedbackError },
+                  String(feedback.text),
+                ),
+          )
+        }
+
         function Section(): any {
           useLocaleRevision()
           const [state, setState] = React.useState({ status: 'loading' })
-          const [revealed, setRevealed] = React.useState(false)
 
           React.useEffect(() => {
             let alive = true
@@ -368,8 +581,8 @@
                 .then((response: any) =>
                   response.ok ? response.json() : Promise.reject(new Error(`HTTP ${String(response.status)}`)),
                 )
-                .then((data: any) => {
-                  if (alive) setState({ status: 'ready', data })
+                .then((payload: any) => {
+                  if (alive) setState({ status: 'ready', data: payload })
                 })
                 .catch((error: any) => {
                   if (alive) setState({ status: 'error', message: String(error?.message ?? error) })
@@ -402,50 +615,20 @@
             )
           }
 
-          const data = state.data
-          const token = String(data.token)
-          const masked = `${token.slice(0, 6)}…${token.slice(-4)}`
-
+          const payload = state.data
           return h(
             'div',
             { style: styles.page },
             header,
-            h(StatusCard, { status: data.status }),
-            h(LogCard, { entries: data.log ?? [] }),
-            h(
-              'section',
-              { style: styles.card },
-              h(
-                'div',
-                { style: styles.row },
-                h('span', { style: styles.rowLabel }, t('endpoint')),
-                h('span', { style: styles.rowValue }, data.url),
-                h('div', { style: styles.actions }, h(CopyButton, { text: data.url })),
-              ),
-              h(
-                'div',
-                { style: styles.row },
-                h('span', { style: styles.rowLabel }, t('bearer')),
-                h('span', { style: styles.rowValue }, revealed ? token : masked),
-                h(
-                  'div',
-                  { style: styles.actions },
-                  h(
-                    'button',
-                    {
-                      type: 'button',
-                      style: styles.button,
-                      onClick: () => setRevealed((value: boolean) => !value),
-                    },
-                    revealed ? t('hide') : t('show'),
-                  ),
-                  h(CopyButton, { text: token }),
-                ),
-              ),
-            ),
-            h(Snippet, { title: t('jsonTitle'), text: data.snippets.json }),
-            h(Snippet, { title: t('codexTitle'), text: data.snippets.codexToml }),
-            h(Snippet, { title: t('claudeTitle'), text: data.snippets.claudeCode }),
+            h(StatusCard, { status: payload.status }),
+            h(LogCard, { entries: payload.log ?? [] }),
+            h(ConnectionCard, {
+              data: payload,
+              onPayload: (next: any) => setState({ status: 'ready', data: next }),
+            }),
+            h(Snippet, { title: t('jsonTitle'), text: payload.snippets.json }),
+            h(Snippet, { title: t('codexTitle'), text: payload.snippets.codexToml }),
+            h(Snippet, { title: t('claudeTitle'), text: payload.snippets.claudeCode }),
             h('p', { style: styles.note }, t('note')),
           )
         }

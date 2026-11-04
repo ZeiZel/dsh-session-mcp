@@ -10,10 +10,13 @@
  * resolved endpoint and a ready `mcpServers` fragment are written to
  * `$DSH_HOME/state/dsh-session-mcp.json` on every start.
  *
+ * The Settings page can move the listener to another port and rotate the bearer
+ * token over the authenticated `/api` channel; both choices are persisted here.
+ *
  * @module dsh-session-mcp
  */
 import { readFileSync } from 'node:fs';
-import { clientConfig, CONFIG_ROUTE_PATH, createToken, DEFAULT_HOST, DEFAULT_PORT, readState, SERVER_NAME, snippetsFor, writeState, } from './config.js';
+import { clientConfig, CONFIG_ROUTE_PATH, createToken, DEFAULT_HOST, DEFAULT_PORT, PORT_RANGE, PORT_ROUTE_PATH, readState, SERVER_NAME, snippetsFor, TOKEN_ROUTE_PATH, writeState, } from './config.js';
 import { RequestJournal } from './log.js';
 import { startEndpoint } from './server.js';
 /** Stable Cordis plugin name. */
@@ -51,43 +54,57 @@ function settingsOf(config) {
     const host = config?.host !== undefined && config.host.length > 0 ? config.host : DEFAULT_HOST;
     return { port, host };
 }
+/** One JSON response on the authenticated channel. */
+function jsonResponse(body, status = 200) {
+    return new Response(JSON.stringify(body), {
+        status,
+        headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+    });
+}
 /**
  * Mount the endpoint.
  * @param ctx - Host context carrying `sessionController`.
  * @param config - Loader row config: `{ port?, host? }`.
  */
 export async function apply(ctx, config) {
-    const { port, host } = settingsOf(config);
+    const { port: configuredPort, host } = settingsOf(config);
     const version = packageVersion();
     const stored = readState();
-    const token = stored?.token ?? createToken();
+    let token = stored?.token ?? createToken();
     const createdAt = stored?.createdAt ?? new Date().toISOString();
     const journal = new RequestJournal();
-    const endpoint = await startEndpoint({
+    /** Port the user last chose; it wins over the row config on restart. */
+    let preferredPort = stored?.preferredPort ?? configuredPort;
+    let endpoint = await startEndpoint({
         controller: ctx.sessionController,
-        token,
+        token: () => token,
         host,
-        port,
+        port: preferredPort,
         version,
         logger: ctx.logger,
         journal,
     });
-    const state = {
-        version: 1,
-        name: SERVER_NAME,
-        url: endpoint.url,
-        host,
-        port: endpoint.port,
-        token,
-        createdAt,
-        updatedAt: new Date().toISOString(),
-        client: clientConfig(endpoint.url, token),
+    /** Persist the current facts and the chosen port. */
+    const persist = () => {
+        const state = {
+            version: 1,
+            name: SERVER_NAME,
+            url: endpoint.url,
+            host,
+            port: endpoint.port,
+            preferredPort,
+            token,
+            createdAt,
+            updatedAt: new Date().toISOString(),
+            client: clientConfig(endpoint.url, token),
+        };
+        return writeState(state);
     };
-    const file = writeState(state);
+    let file = persist();
     ctx.logger?.info?.(`dsh-session-mcp: MCP endpoint listening at ${endpoint.url}`);
     ctx.logger?.info?.(`dsh-session-mcp: bearer token and client config in ${file}`);
     console.log(`dsh-session-mcp: ${endpoint.url} (bearer in ${file})`);
-    console.log(JSON.stringify(state.client, null, 2));
+    console.log(JSON.stringify(clientConfig(endpoint.url, token), null, 2));
     /** Resolve conversation titles for the journalled calls, best effort. */
     const titlesFor = async (ids) => {
         const titles = new Map();
@@ -120,7 +137,7 @@ export async function apply(ctx, config) {
             host,
             port: endpoint.port,
             token,
-            updatedAt: state.updatedAt,
+            updatedAt: new Date().toISOString(),
             snippets: snippetsFor(endpoint.url, token),
             status: {
                 state: 'listening',
@@ -133,20 +150,93 @@ export async function apply(ctx, config) {
             log,
         };
     };
-    // The Settings page reads the live config over the authenticated `/api`
-    // channel, so the token never enters the served HTML.
+    /**
+     * Move the listener to another port, restoring the old one when the new port
+     * cannot be bound.
+     * @param port - requested loopback port.
+     */
+    const moveTo = async (port) => {
+        const previousPort = endpoint.port;
+        await endpoint.close();
+        try {
+            endpoint = await startEndpoint({
+                controller: ctx.sessionController,
+                token: () => token,
+                host,
+                port,
+                version,
+                logger: ctx.logger,
+                journal,
+                // The user named a port: never silently bind a random one instead.
+                allowFallback: false,
+            });
+        }
+        catch (error) {
+            endpoint = await startEndpoint({
+                controller: ctx.sessionController,
+                token: () => token,
+                host,
+                port: previousPort,
+                version,
+                logger: ctx.logger,
+                journal,
+            });
+            throw error;
+        }
+    };
+    // The Settings page reads and mutates the live config over the authenticated
+    // `/api` channel, so the token never enters the served HTML.
     ctx.inject(['connection'], (connectionCtx) => {
-        connectionCtx.connection.fetch.register({
+        const register = connectionCtx.connection.fetch.register;
+        register({
             path: CONFIG_ROUTE_PATH,
             methods: ['GET'],
             requestBody: 'buffered',
-            fetch: async () => new Response(JSON.stringify(await buildPayload()), {
-                status: 200,
-                headers: {
-                    'content-type': 'application/json; charset=utf-8',
-                    'cache-control': 'no-store',
-                },
-            }),
+            fetch: async () => jsonResponse(await buildPayload()),
+        });
+        register({
+            path: PORT_ROUTE_PATH,
+            methods: ['POST'],
+            requestBody: 'buffered',
+            fetch: async (request) => {
+                let body;
+                try {
+                    body = await request.json();
+                }
+                catch {
+                    return jsonResponse({ error: 'invalid_body', message: 'expected a JSON body' }, 400);
+                }
+                const requested = Number(body?.port);
+                if (!Number.isInteger(requested) || requested < PORT_RANGE.min || requested > PORT_RANGE.max) {
+                    return jsonResponse({
+                        error: 'invalid_port',
+                        message: `port must be an integer between ${String(PORT_RANGE.min)} and ${String(PORT_RANGE.max)}`,
+                    }, 400);
+                }
+                try {
+                    await moveTo(requested);
+                }
+                catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    ctx.logger?.warn?.(`dsh-session-mcp: could not move to port ${String(requested)}: ${message}`);
+                    return jsonResponse({ error: 'port_unavailable', message }, 409);
+                }
+                preferredPort = requested;
+                file = persist();
+                ctx.logger?.info?.(`dsh-session-mcp: moved to ${endpoint.url}`);
+                return jsonResponse(await buildPayload());
+            },
+        });
+        register({
+            path: TOKEN_ROUTE_PATH,
+            methods: ['POST'],
+            requestBody: 'buffered',
+            fetch: async () => {
+                token = createToken();
+                file = persist();
+                ctx.logger?.info?.('dsh-session-mcp: bearer token rotated');
+                return jsonResponse(await buildPayload());
+            },
         });
     });
     ctx.effect(() => () => {

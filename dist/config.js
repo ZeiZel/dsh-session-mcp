@@ -59,6 +59,7 @@ export function readState() {
         return {
             token: candidate.token,
             ...(typeof candidate.createdAt === 'string' ? { createdAt: candidate.createdAt } : {}),
+            ...(typeof candidate.preferredPort === 'number' ? { preferredPort: candidate.preferredPort } : {}),
         };
     }
     catch {
@@ -122,6 +123,12 @@ export function clientConfig(url, token) {
 }
 /** Path of the authenticated config route the Settings page reads. */
 export const CONFIG_ROUTE_PATH = '/api/dsh-session-mcp/config';
+/** Path that moves the listener to another port. */
+export const PORT_ROUTE_PATH = '/api/dsh-session-mcp/port';
+/** Path that replaces the bearer token. */
+export const TOKEN_ROUTE_PATH = '/api/dsh-session-mcp/token';
+/** Lowest and highest port the Settings page accepts. */
+export const PORT_RANGE = { min: 1, max: 65535 };
 /**
  * Render the copy-paste snippets for one endpoint.
  * @param url - full MCP endpoint URL.

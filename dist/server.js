@@ -75,7 +75,7 @@ function json(res, status, body, headers = {}) {
  * @param host - bind address.
  * @returns the bound port and whether the fallback ran.
  */
-async function bind(server, port, host) {
+async function bind(server, port, host, allowFallback) {
     const attempt = (wanted) => new Promise((resolve, reject) => {
         const onError = (error) => {
             server.off('listening', onListening);
@@ -99,7 +99,7 @@ async function bind(server, port, host) {
     }
     catch (error) {
         const code = error?.code;
-        if (port === 0 || code !== 'EADDRINUSE')
+        if (port === 0 || code !== 'EADDRINUSE' || !allowFallback)
             throw error;
         return { port: await attempt(0), fellBack: true };
     }
@@ -110,7 +110,8 @@ async function bind(server, port, host) {
  * @returns the resolved endpoint plus a disposer.
  */
 export async function startEndpoint(options) {
-    const { controller, token, host, port, version, logger, journal } = options;
+    const { controller, token, host, port, version, logger, journal, allowFallback = true } = options;
+    const readToken = typeof token === 'function' ? token : () => token;
     const handler = buildMcpHandler(controller, version, journal);
     const nodeHandler = toNodeHandler(handler);
     const server = createServer((req, res) => {
@@ -118,7 +119,7 @@ export async function startEndpoint(options) {
             json(res, 403, { error: 'forbidden', message: 'this endpoint accepts loopback hosts only' });
             return;
         }
-        if (!bearerMatches(token, req.headers.authorization)) {
+        if (!bearerMatches(readToken(), req.headers.authorization)) {
             json(res, 401, { error: 'unauthorized', message: 'send Authorization: Bearer <token> from the Harness endpoint file' }, { 'www-authenticate': `Bearer realm="${SERVER_NAME}"` });
             return;
         }
@@ -129,7 +130,7 @@ export async function startEndpoint(options) {
         }
         void nodeHandler(req, res);
     });
-    const bound = await bind(server, port, host);
+    const bound = await bind(server, port, host, allowFallback);
     if (bound.fellBack) {
         logger?.warn?.(`dsh-session-mcp: port ${port} is in use; bound an ephemeral port ${bound.port} instead`);
     }

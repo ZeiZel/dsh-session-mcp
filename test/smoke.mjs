@@ -113,9 +113,17 @@ function check(label, condition, detail = '') {
   console.log(`  FAIL ${label}${detail === '' ? '' : ` — ${detail}`}`)
 }
 
-const token = createToken()
+// The listener reads the token per request, so rotation takes effect live.
+let token = createToken()
 const journal = new RequestJournal()
-const endpoint = await startEndpoint({ controller, token, host: '127.0.0.1', port: 0, version: 'test', journal })
+const endpoint = await startEndpoint({
+  controller,
+  token: () => token,
+  host: '127.0.0.1',
+  port: 0,
+  version: 'test',
+  journal,
+})
 
 try {
   console.log('auth')
@@ -179,6 +187,30 @@ try {
   check('the failure is remembered', journal.lastFailure?.tool === 'session_send')
 
   await client.close()
+
+  console.log('rotation')
+  const previous = token
+  token = createToken()
+  const stale = await fetch(endpoint.url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+      authorization: `Bearer ${previous}`,
+    },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+  })
+  check('the previous bearer stops working', stale.status === 401, `got ${String(stale.status)}`)
+
+  const rotated = new Client({ name: 'smoke-rotated', version: '0' }, { capabilities: {} })
+  await rotated.connect(
+    new StreamableHTTPClientTransport(new URL(endpoint.url), {
+      requestInit: { headers: { Authorization: `Bearer ${token}` } },
+    }),
+  )
+  const afterRotation = await rotated.listTools()
+  check('the new bearer works without a restart', afterRotation.tools.length === EXPECTED_TOOLS.length)
+  await rotated.close()
 } finally {
   await endpoint.close()
 }

@@ -13,12 +13,19 @@ export interface RunningEndpoint {
 /** Options accepted by {@link startEndpoint}. */
 export interface StartEndpointOptions {
     readonly controller: SessionController;
-    readonly token: string;
+    /** Bearer token, or a reader so rotation applies to the running listener. */
+    readonly token: string | (() => string);
     readonly host: string;
     readonly port: number;
     readonly version: string;
     readonly logger?: PluginLogger | undefined;
     readonly journal?: RequestJournal | undefined;
+    /**
+     * Whether a busy port may fall back to an ephemeral one. Startup wants that;
+     * an explicit port change from Settings does not, because the user asked for
+     * a specific port and a silent random one would be a lie.
+     */
+    readonly allowFallback?: boolean;
 }
 /**
  * Build the web-standard MCP handler for one session controller.

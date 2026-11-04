@@ -99,14 +99,15 @@ session_fork  { sessionId, atSeq }   → new conversation id
 session_send  { sessionId: <new> }   → try the alternative there
 ```
 
-## Settings → MCP
+## Settings → DeepSeek MCP
 
 The harness renders a dedicated settings page. It shows:
 
 - **Status** — listening, uptime, total requests served, and the last failure when one happened
 - **Recent requests** — the newest five tool calls: what ran, when, the conversation it
   addressed (title, with the id on hover), and whether it succeeded, with duration
-- the live endpoint and the bearer token (masked until you reveal it)
+- **Connection** — the endpoint, an editable **port**, and the bearer token (masked until you
+  reveal it) with a **Rotate token** action
 - three copy-ready blocks:
 
 | Block | For |
@@ -117,6 +118,22 @@ The harness renders a dedicated settings page. It shows:
 
 Each block has its own **Copy** button; the endpoint and the token have one too. The page
 refreshes every 10 seconds while it is open.
+
+### Changing the port
+
+Type a port and press **Apply**. The listener moves immediately, the state file and every
+snippet are rewritten, and the chosen port is remembered across restarts. If the port
+cannot be bound the listener stays where it was and the page says why.
+
+The Settings page itself lives on the harness Web port, so moving the MCP endpoint never
+disconnects the page you are looking at — but every client config that names the old port
+stops working.
+
+### Rotating the token
+
+**Rotate token** asks once for confirmation, then replaces the bearer. The running listener
+picks it up on the next request — no restart — and the old token stops working at the same
+moment. Update the clients you care about with the new value from the snippets.
 
 Only the last five calls are kept — the plugin is not a log store, and schema-rejected
 calls (wrong arguments) never reach a tool, so they are not journalled. Conversation titles
@@ -182,11 +199,11 @@ revision and falls back to stateless serving for 2025-era traffic.
 - Every request needs `Authorization: Bearer <token>`; the check is constant-time.
 - The token is 32 random bytes, generated once, stored `0600` at
   `$DSH_HOME/state/dsh-session-mcp.json`, and reused across restarts so pasted client
-  configs keep working.
+  configs keep working. Rotate it from Settings → DeepSeek MCP.
 - The Settings page reads its data from `/api/dsh-session-mcp/config` over the
   authenticated browser channel, so the token never enters the served HTML.
-- **Rotate** by deleting the state file and restarting the harness. Every client then needs
-  the new token.
+- Rotating from the page (or deleting the state file and restarting) invalidates every
+  client config that still carries the old token.
 - Never expose this endpoint through a proxy or a tunnel: the bearer is the only thing
   between a client and every conversation you have.
 
@@ -196,7 +213,7 @@ The plugin row accepts two options (`cordis.patch.yml`):
 
 | Option | Default | Meaning |
 |---|---|---|
-| `port` | `7801` | Preferred loopback port. If taken, an ephemeral port is used and the state file is republished with the real URL. |
+| `port` | `7801` | Initial loopback port. A port chosen in Settings is stored in the state file and wins over this value on the next start; if the port is taken, an ephemeral one is used and the state file is republished with the real URL. |
 | `host` | `127.0.0.1` | Bind address. |
 
 ## How it works
@@ -205,7 +222,7 @@ Written in TypeScript, compiled to `dist/` (committed, so installs need no build
 
 | Source | Role |
 |---|---|
-| `src/index.ts` | Cordis plugin: reads/creates the bearer, starts the listener, publishes the state file, serves the Settings config route, closes the listener on unload |
+| `src/index.ts` | Cordis plugin: reads/creates the bearer, starts the listener, publishes the state file, serves the Settings routes (read config, move port, rotate token), closes the listener on unload |
 | `src/server.ts` | `node:http` listener with the bearer gate in front of the official SDK's `createMcpHandler` + `toNodeHandler` |
 | `src/tools.ts` | The eleven tools, backed directly by `ctx.sessionController` |
 | `src/log.ts` | Bounded journal of the last five calls |

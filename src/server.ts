@@ -43,12 +43,19 @@ export interface RunningEndpoint {
 /** Options accepted by {@link startEndpoint}. */
 export interface StartEndpointOptions {
   readonly controller: SessionController
-  readonly token: string
+  /** Bearer token, or a reader so rotation applies to the running listener. */
+  readonly token: string | (() => string)
   readonly host: string
   readonly port: number
   readonly version: string
   readonly logger?: PluginLogger | undefined
   readonly journal?: RequestJournal | undefined
+  /**
+   * Whether a busy port may fall back to an ephemeral one. Startup wants that;
+   * an explicit port change from Settings does not, because the user asked for
+   * a specific port and a silent random one would be a lie.
+   */
+  readonly allowFallback?: boolean
 }
 
 /**
@@ -102,7 +109,12 @@ function json(res: ServerResponse, status: number, body: unknown, headers: Recor
  * @param host - bind address.
  * @returns the bound port and whether the fallback ran.
  */
-async function bind(server: Server, port: number, host: string): Promise<{ port: number; fellBack: boolean }> {
+async function bind(
+  server: Server,
+  port: number,
+  host: string,
+  allowFallback: boolean,
+): Promise<{ port: number; fellBack: boolean }> {
   const attempt = (wanted: number): Promise<number> =>
     new Promise((resolve, reject) => {
       const onError = (error: Error): void => {
@@ -127,7 +139,7 @@ async function bind(server: Server, port: number, host: string): Promise<{ port:
     return { port: await attempt(port), fellBack: false }
   } catch (error) {
     const code = (error as { code?: string } | null)?.code
-    if (port === 0 || code !== 'EADDRINUSE') throw error
+    if (port === 0 || code !== 'EADDRINUSE' || !allowFallback) throw error
     return { port: await attempt(0), fellBack: true }
   }
 }
@@ -138,7 +150,8 @@ async function bind(server: Server, port: number, host: string): Promise<{ port:
  * @returns the resolved endpoint plus a disposer.
  */
 export async function startEndpoint(options: StartEndpointOptions): Promise<RunningEndpoint> {
-  const { controller, token, host, port, version, logger, journal } = options
+  const { controller, token, host, port, version, logger, journal, allowFallback = true } = options
+  const readToken = typeof token === 'function' ? token : (): string => token
   const handler = buildMcpHandler(controller, version, journal)
   const nodeHandler = toNodeHandler(handler)
 
@@ -147,7 +160,7 @@ export async function startEndpoint(options: StartEndpointOptions): Promise<Runn
       json(res, 403, { error: 'forbidden', message: 'this endpoint accepts loopback hosts only' })
       return
     }
-    if (!bearerMatches(token, req.headers.authorization)) {
+    if (!bearerMatches(readToken(), req.headers.authorization)) {
       json(
         res,
         401,
@@ -164,7 +177,7 @@ export async function startEndpoint(options: StartEndpointOptions): Promise<Runn
     void nodeHandler(req, res)
   })
 
-  const bound = await bind(server, port, host)
+  const bound = await bind(server, port, host, allowFallback)
   if (bound.fellBack) {
     logger?.warn?.(`dsh-session-mcp: port ${port} is in use; bound an ephemeral port ${bound.port} instead`)
   }

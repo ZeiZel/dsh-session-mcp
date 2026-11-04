@@ -95,7 +95,9 @@ To remove it again: `plugin_manager` `remove_bundle`, or `dsh plugin --profile d
    (`session_create` does this).
 3. Return `ok(value)` on success and `fail(error)` on failure — never throw past the
    handler, and never return an error without `isError`.
-4. Add the tool to `EXPECTED_TOOLS` and to the `calls` table in `test/smoke.mjs`.
+4. Add the tool to `EXPECTED_TOOLS` and to the `calls` table in `test/smoke.mjs`. The smoke
+   also covers bearer rotation (the listener reads the token per request) — keep that
+   property if you touch `src/server.ts`.
 5. Add the stub method to the smoke controller.
 6. Document it in the README tools tables.
 7. `bun run typecheck && bun run test && bun run build`, commit `dist/`.
@@ -111,9 +113,12 @@ and renders inside the settings content column. Conventions:
   `ctx.locale.register(NS, locale, dict)` and translate with `ctx.locale.bind(NS)`. Both
   dictionaries must carry the same keys.
 - Colors come from theme tokens (`--dsw-alias-*`), never hardcoded.
-- Everything the page shows arrives from `/api/dsh-session-mcp/config`; do not add a second
-  endpoint.
+- Everything the page shows arrives from `/api/dsh-session-mcp/config`; the two mutations use
+  `/api/dsh-session-mcp/port` and `/api/dsh-session-mcp/token`. Keep the surface at those
+  three routes.
 - Clean up subscriptions and timers in the effect's cleanup function.
+- Destructive actions (token rotation) confirm inline, in two steps — never a browser
+  `confirm()`.
 
 ## Commit and pull request
 

@@ -24,7 +24,10 @@ export interface EndpointState {
     readonly name: string;
     readonly url: string;
     readonly host: string;
+    /** Port the listener actually bound. */
     readonly port: number;
+    /** Port the Settings page asked for; tried first on the next start. */
+    readonly preferredPort: number;
     readonly token: string;
     readonly createdAt: string;
     readonly updatedAt: string;
@@ -34,6 +37,8 @@ export interface EndpointState {
 export interface StoredState {
     readonly token: string;
     readonly createdAt?: string;
+    /** Port the user last chose; the listener tries it before the row config. */
+    readonly preferredPort?: number;
 }
 /**
  * Resolve `$DSH_HOME` the way the launcher does.
@@ -77,6 +82,15 @@ export declare function bearerMatches(expected: string, header: string | undefin
 export declare function clientConfig(url: string, token: string): ClientConfig;
 /** Path of the authenticated config route the Settings page reads. */
 export declare const CONFIG_ROUTE_PATH = "/api/dsh-session-mcp/config";
+/** Path that moves the listener to another port. */
+export declare const PORT_ROUTE_PATH = "/api/dsh-session-mcp/port";
+/** Path that replaces the bearer token. */
+export declare const TOKEN_ROUTE_PATH = "/api/dsh-session-mcp/token";
+/** Lowest and highest port the Settings page accepts. */
+export declare const PORT_RANGE: {
+    readonly min: 1;
+    readonly max: 65535;
+};
 /** Every snippet the Settings page offers for copying. */
 export interface ConfigSnippets {
     /** `mcpServers` JSON for Claude Desktop, Cursor and other JSON clients. */
