@@ -2,8 +2,9 @@
 /**
  * dsh-session-mcp — Client half.
  *
- * Registers the MCP settings page: the live endpoint, the bearer token, and
- * copy-ready configuration blocks for every client this harness can serve.
+ * Registers the MCP settings page: live status, the last few requests, the
+ * endpoint, the bearer token, and copy-ready configuration blocks for every
+ * client this harness can serve.
  *
  * The page reads the config over the authenticated `/api` channel, so the token
  * never appears in the served HTML.
@@ -24,12 +25,25 @@ globalThis.__ModuleLoader__.load({
         const h = React.createElement;
         /** Locale namespace owned by this page. */
         const NS = 'dsh-session-mcp';
-        /** Where the Host publishes the live config. */
+        /** Where the Host publishes the live config, status and request journal. */
         const CONFIG_URL = '/api/dsh-session-mcp/config';
+        /** How often the page refreshes while open. */
+        const REFRESH_MS = 10000;
         const EN = {
             title: 'MCP',
             heading: 'MCP endpoint',
             description: 'Connect Claude Code, Codex, Cursor or any other MCP client to this harness. The endpoint starts together with the harness and requires the bearer token below.',
+            statusTitle: 'Status',
+            listening: 'Listening',
+            uptime: 'Uptime',
+            requests: 'Requests',
+            lastError: 'Last error',
+            logTitle: 'Recent requests',
+            logEmpty: 'No requests yet. Connect a client and call a tool.',
+            colTime: 'Time',
+            colTool: 'Request',
+            colSession: 'Conversation',
+            colResult: 'Result',
             endpoint: 'Endpoint',
             bearer: 'Bearer token',
             show: 'Show',
@@ -42,11 +56,24 @@ globalThis.__ModuleLoader__.load({
             note: 'Paste any block into your client. The token is stable across restarts; it rotates only when you delete $DSH_HOME/state/dsh-session-mcp.json and restart the harness.',
             loading: 'Loading…',
             error: 'Could not read the endpoint config: ',
+            noSession: '—',
+            failed: 'error',
         };
         const RU = {
             title: 'MCP',
             heading: 'MCP-эндпоинт',
             description: 'Подключите Claude Code, Codex, Cursor или любой другой MCP-клиент к этому харнесу. Эндпоинт поднимается вместе с харнесом и требует Bearer-токен ниже.',
+            statusTitle: 'Статус',
+            listening: 'Слушает',
+            uptime: 'В работе',
+            requests: 'Запросов',
+            lastError: 'Последняя ошибка',
+            logTitle: 'Последние запросы',
+            logEmpty: 'Запросов пока нет. Подключите клиент и вызовите инструмент.',
+            colTime: 'Время',
+            colTool: 'Запрос',
+            colSession: 'Сессия',
+            colResult: 'Результат',
             endpoint: 'Эндпоинт',
             bearer: 'Bearer-токен',
             show: 'Показать',
@@ -59,6 +86,8 @@ globalThis.__ModuleLoader__.load({
             note: 'Вставьте любой блок в свой клиент. Токен не меняется между перезапусками; он обновится только если удалить $DSH_HOME/state/dsh-session-mcp.json и перезапустить харнес.',
             loading: 'Загрузка…',
             error: 'Не удалось прочитать конфиг эндпоинта: ',
+            noSession: '—',
+            failed: 'ошибка',
         };
         /** Theme-bound inline styles; no colors are hardcoded. */
         const styles = {
@@ -112,6 +141,40 @@ globalThis.__ModuleLoader__.load({
                 color: 'var(--dsw-alias-label-primary)',
                 cursor: 'pointer',
             },
+            pillOk: {
+                display: 'inline-block',
+                padding: '1px 9px',
+                borderRadius: '999px',
+                fontSize: '11px',
+                border: '1px solid var(--dsw-alias-state-success-primary)',
+                color: 'var(--dsw-alias-state-success-primary)',
+                whiteSpace: 'nowrap',
+            },
+            pillError: {
+                display: 'inline-block',
+                padding: '1px 9px',
+                borderRadius: '999px',
+                fontSize: '11px',
+                border: '1px solid var(--dsw-alias-state-error-primary)',
+                color: 'var(--dsw-alias-state-error-primary)',
+                whiteSpace: 'nowrap',
+            },
+            table: { width: '100%', borderCollapse: 'collapse', fontSize: '12px' },
+            th: {
+                textAlign: 'left',
+                fontWeight: 600,
+                color: 'var(--dsw-alias-label-secondary)',
+                padding: '0 8px 6px 0',
+                borderBottom: '1px solid var(--dsw-alias-border-l1)',
+                whiteSpace: 'nowrap',
+            },
+            td: {
+                padding: '6px 8px 6px 0',
+                borderBottom: '1px solid var(--dsw-alias-border-l1)',
+                verticalAlign: 'top',
+            },
+            mono: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' },
+            muted: { color: 'var(--dsw-alias-label-secondary)' },
             pre: {
                 margin: 0,
                 padding: '12px',
@@ -128,6 +191,24 @@ globalThis.__ModuleLoader__.load({
             note: { margin: 0, color: 'var(--dsw-alias-label-secondary)', fontSize: '12px' },
             error: { margin: 0, color: 'var(--dsw-alias-state-error-primary)' },
         };
+        /** `45s`, `12m 3s`, `1h 12m`. */
+        function formatUptime(ms) {
+            const total = Math.max(0, Math.floor(ms / 1000));
+            if (total < 60)
+                return `${String(total)}s`;
+            const minutes = Math.floor(total / 60);
+            if (minutes < 60)
+                return `${String(minutes)}m ${String(total % 60)}s`;
+            const hours = Math.floor(minutes / 60);
+            if (hours < 24)
+                return `${String(hours)}h ${String(minutes % 60)}m`;
+            return `${String(Math.floor(hours / 24))}d ${String(hours % 24)}h`;
+        }
+        /** Local wall-clock time for one ISO timestamp. */
+        function formatTime(iso) {
+            const date = new Date(iso);
+            return Number.isNaN(date.getTime()) ? iso : date.toLocaleTimeString();
+        }
         return {
             inject: ['slots', 'locale'],
             apply(ctx) {
@@ -155,24 +236,49 @@ globalThis.__ModuleLoader__.load({
                 function Snippet(props) {
                     return h('section', { style: styles.card }, h('div', { style: styles.cardHead }, h('span', { style: styles.cardTitle }, props.title), h(CopyButton, { text: props.text })), h('pre', { style: styles.pre }, props.text));
                 }
+                function StatusCard(props) {
+                    const status = props.status;
+                    const failure = status.lastFailure;
+                    return h('section', { style: styles.card }, h('div', { style: styles.cardHead }, h('span', { style: styles.cardTitle }, t('statusTitle')), h('span', { style: styles.pillOk }, t('listening'))), h('div', { style: styles.row }, h('span', { style: styles.rowLabel }, t('uptime')), h('span', { style: styles.rowValue }, formatUptime(Number(status.uptimeMs)))), h('div', { style: styles.row }, h('span', { style: styles.rowLabel }, t('requests')), h('span', { style: styles.rowValue }, String(status.totalCalls))), failure === null || failure === undefined
+                        ? null
+                        : h('div', { style: styles.row }, h('span', { style: styles.rowLabel }, t('lastError')), h('span', { style: { ...styles.rowValue, color: 'var(--dsw-alias-state-error-primary)' } }, `${String(failure.tool)} · ${formatTime(String(failure.at))} · ${String(failure.message)}`)));
+                }
+                function LogCard(props) {
+                    const entries = props.entries ?? [];
+                    const head = h('div', { style: styles.cardHead }, h('span', { style: styles.cardTitle }, t('logTitle')), h('span', { style: styles.muted }, String(entries.length)));
+                    if (entries.length === 0) {
+                        return h('section', { style: styles.card }, head, h('p', { style: styles.note }, t('logEmpty')));
+                    }
+                    const rows = entries.map((entry) => h('tr', { key: String(entry.id) }, h('td', { style: { ...styles.td, ...styles.mono, whiteSpace: 'nowrap' } }, formatTime(String(entry.at))), h('td', { style: { ...styles.td, ...styles.mono } }, String(entry.tool)), h('td', { style: styles.td }, entry.sessionId === null
+                        ? h('span', { style: styles.muted }, t('noSession'))
+                        : h('span', { title: String(entry.sessionId) }, String(entry.sessionTitle ?? `${String(entry.sessionId).slice(0, 14)}…`))), h('td', { style: { ...styles.td, whiteSpace: 'nowrap' } }, entry.ok
+                        ? h('span', { style: styles.pillOk }, `ok · ${String(entry.ms)}ms`)
+                        : h('span', { style: styles.pillError, title: String(entry.error ?? '') }, t('failed')))));
+                    return h('section', { style: styles.card }, head, h('table', { style: styles.table }, h('thead', null, h('tr', null, h('th', { style: styles.th }, t('colTime')), h('th', { style: styles.th }, t('colTool')), h('th', { style: styles.th }, t('colSession')), h('th', { style: styles.th }, t('colResult')))), h('tbody', null, rows)));
+                }
                 function Section() {
                     useLocaleRevision();
                     const [state, setState] = React.useState({ status: 'loading' });
                     const [revealed, setRevealed] = React.useState(false);
                     React.useEffect(() => {
                         let alive = true;
-                        g.fetch(CONFIG_URL, { headers: { accept: 'application/json' }, credentials: 'same-origin' })
-                            .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${String(response.status)}`)))
-                            .then((data) => {
-                            if (alive)
-                                setState({ status: 'ready', data });
-                        })
-                            .catch((error) => {
-                            if (alive)
-                                setState({ status: 'error', message: String(error?.message ?? error) });
-                        });
+                        const load = () => {
+                            g.fetch(CONFIG_URL, { headers: { accept: 'application/json' }, credentials: 'same-origin' })
+                                .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${String(response.status)}`)))
+                                .then((data) => {
+                                if (alive)
+                                    setState({ status: 'ready', data });
+                            })
+                                .catch((error) => {
+                                if (alive)
+                                    setState({ status: 'error', message: String(error?.message ?? error) });
+                            });
+                        };
+                        load();
+                        const timer = g.setInterval(load, REFRESH_MS);
                         return () => {
                             alive = false;
+                            g.clearInterval(timer);
                         };
                     }, []);
                     const header = h('div', { style: { display: 'grid', gap: '4px' } }, h('h2', { style: styles.heading }, t('heading')), h('p', { style: styles.description }, t('description')));
@@ -185,7 +291,7 @@ globalThis.__ModuleLoader__.load({
                     const data = state.data;
                     const token = String(data.token);
                     const masked = `${token.slice(0, 6)}…${token.slice(-4)}`;
-                    return h('div', { style: styles.page }, header, h('section', { style: styles.card }, h('div', { style: styles.row }, h('span', { style: styles.rowLabel }, t('endpoint')), h('span', { style: styles.rowValue }, data.url), h('div', { style: styles.actions }, h(CopyButton, { text: data.url }))), h('div', { style: styles.row }, h('span', { style: styles.rowLabel }, t('bearer')), h('span', { style: styles.rowValue }, revealed ? token : masked), h('div', { style: styles.actions }, h('button', {
+                    return h('div', { style: styles.page }, header, h(StatusCard, { status: data.status }), h(LogCard, { entries: data.log ?? [] }), h('section', { style: styles.card }, h('div', { style: styles.row }, h('span', { style: styles.rowLabel }, t('endpoint')), h('span', { style: styles.rowValue }, data.url), h('div', { style: styles.actions }, h(CopyButton, { text: data.url }))), h('div', { style: styles.row }, h('span', { style: styles.rowLabel }, t('bearer')), h('span', { style: styles.rowValue }, revealed ? token : masked), h('div', { style: styles.actions }, h('button', {
                         type: 'button',
                         style: styles.button,
                         onClick: () => setRevealed((value) => !value),

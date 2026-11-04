@@ -14,6 +14,7 @@ import type { AddressInfo } from 'node:net'
 import { toNodeHandler } from '@modelcontextprotocol/node'
 import { createMcpHandler, McpServer } from '@modelcontextprotocol/server'
 import { bearerMatches, SERVER_NAME } from './config.js'
+import type { RequestJournal } from './log.js'
 import { registerTools } from './tools.js'
 import type { PluginLogger, SessionController } from './types.js'
 
@@ -47,6 +48,7 @@ export interface StartEndpointOptions {
   readonly port: number
   readonly version: string
   readonly logger?: PluginLogger | undefined
+  readonly journal?: RequestJournal | undefined
 }
 
 /**
@@ -55,10 +57,10 @@ export interface StartEndpointOptions {
  * @param version - advertised server version.
  * @returns an object exposing `fetch(Request)`.
  */
-export function buildMcpHandler(controller: SessionController, version: string) {
+export function buildMcpHandler(controller: SessionController, version: string, journal?: RequestJournal) {
   return createMcpHandler(() => {
     const server = new McpServer({ name: SERVER_NAME, version }, { instructions: SERVER_INSTRUCTIONS })
-    registerTools(server, controller)
+    registerTools(server, controller, journal)
     return server
   })
 }
@@ -136,8 +138,8 @@ async function bind(server: Server, port: number, host: string): Promise<{ port:
  * @returns the resolved endpoint plus a disposer.
  */
 export async function startEndpoint(options: StartEndpointOptions): Promise<RunningEndpoint> {
-  const { controller, token, host, port, version, logger } = options
-  const handler = buildMcpHandler(controller, version)
+  const { controller, token, host, port, version, logger, journal } = options
+  const handler = buildMcpHandler(controller, version, journal)
   const nodeHandler = toNodeHandler(handler)
 
   const server = createServer((req, res) => {

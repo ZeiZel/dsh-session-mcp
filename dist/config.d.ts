@@ -93,6 +93,31 @@ export interface ConfigSnippets {
  * @returns the three snippets the Settings page shows.
  */
 export declare function snippetsFor(url: string, token: string): ConfigSnippets;
+/** Live health of the MCP endpoint, as the Settings page shows it. */
+export interface StatusPayload {
+    /** `listening` while the plugin serves; the page never renders a dead endpoint as healthy. */
+    readonly state: 'listening';
+    readonly version: string;
+    readonly startedAt: string;
+    readonly uptimeMs: number;
+    readonly totalCalls: number;
+    readonly lastFailure: {
+        readonly at: string;
+        readonly tool: string;
+        readonly message: string;
+    } | null;
+}
+/** One journalled call with the conversation title resolved for display. */
+export interface LogEntry {
+    readonly id: number;
+    readonly tool: string;
+    readonly at: string;
+    readonly sessionId: string | null;
+    readonly sessionTitle: string | null;
+    readonly ok: boolean;
+    readonly ms: number;
+    readonly error?: string;
+}
 /** What the Settings page receives from the Host. */
 export interface ConfigPayload {
     readonly name: string;
@@ -102,4 +127,6 @@ export interface ConfigPayload {
     readonly token: string;
     readonly updatedAt: string;
     readonly snippets: ConfigSnippets;
+    readonly status: StatusPayload;
+    readonly log: readonly LogEntry[];
 }

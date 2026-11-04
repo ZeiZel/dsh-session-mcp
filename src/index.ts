@@ -25,7 +25,9 @@ import {
   writeState,
   type ConfigPayload,
   type EndpointState,
+  type LogEntry,
 } from './config.js'
+import { RequestJournal } from './log.js'
 import { startEndpoint } from './server.js'
 import type { PluginContext } from './types.js'
 
@@ -86,6 +88,7 @@ export async function apply(ctx: PluginContext, config?: Config): Promise<void> 
   const stored = readState()
   const token = stored?.token ?? createToken()
   const createdAt = stored?.createdAt ?? new Date().toISOString()
+  const journal = new RequestJournal()
 
   const endpoint = await startEndpoint({
     controller: ctx.sessionController,
@@ -94,6 +97,7 @@ export async function apply(ctx: PluginContext, config?: Config): Promise<void> 
     port,
     version,
     logger: ctx.logger,
+    journal,
   })
 
   const state: EndpointState = {
@@ -115,24 +119,59 @@ export async function apply(ctx: PluginContext, config?: Config): Promise<void> 
   console.log(`dsh-session-mcp: ${endpoint.url} (bearer in ${file})`)
   console.log(JSON.stringify(state.client, null, 2))
 
+  /** Resolve conversation titles for the journalled calls, best effort. */
+  const titlesFor = async (ids: readonly string[]): Promise<Map<string, string | null>> => {
+    const titles = new Map<string, string | null>()
+    if (ids.length === 0) return titles
+    try {
+      const rows = await ctx.sessionController.list({}, new AbortController().signal)
+      for (const row of rows?.items ?? []) {
+        if (ids.includes(row.sessionId)) titles.set(row.sessionId, row.projections?.values?.title ?? null)
+      }
+    } catch {
+      /* Titles decorate the log; a failed lookup must not fail the page. */
+    }
+    return titles
+  }
+
+  /** Build the Settings payload fresh on every read. */
+  const buildPayload = async (): Promise<ConfigPayload> => {
+    const records = journal.snapshot()
+    const ids = [...new Set(records.map((entry) => entry.sessionId).filter((id): id is string => id !== null))]
+    const titles = await titlesFor(ids)
+    const log: LogEntry[] = records.map((entry) => ({
+      ...entry,
+      sessionTitle: entry.sessionId === null ? null : (titles.get(entry.sessionId) ?? null),
+    }))
+    return {
+      name: SERVER_NAME,
+      url: endpoint.url,
+      host,
+      port: endpoint.port,
+      token,
+      updatedAt: state.updatedAt,
+      snippets: snippetsFor(endpoint.url, token),
+      status: {
+        state: 'listening',
+        version,
+        startedAt: journal.startedAtIso,
+        uptimeMs: Date.now() - Date.parse(journal.startedAtIso),
+        totalCalls: journal.totalCalls,
+        lastFailure: journal.lastFailure,
+      },
+      log,
+    }
+  }
+
   // The Settings page reads the live config over the authenticated `/api`
   // channel, so the token never enters the served HTML.
-  const payload: ConfigPayload = {
-    name: SERVER_NAME,
-    url: endpoint.url,
-    host,
-    port: endpoint.port,
-    token,
-    updatedAt: state.updatedAt,
-    snippets: snippetsFor(endpoint.url, token),
-  }
   ctx.inject(['connection'], (connectionCtx) => {
     connectionCtx.connection.fetch.register({
       path: CONFIG_ROUTE_PATH,
       methods: ['GET'],
       requestBody: 'buffered',
       fetch: async () =>
-        new Response(JSON.stringify(payload), {
+        new Response(JSON.stringify(await buildPayload()), {
           status: 200,
           headers: {
             'content-type': 'application/json; charset=utf-8',

@@ -32,10 +32,10 @@ const LOOPBACK = new Set(['127.0.0.1', '::1', 'localhost', '[::1]']);
  * @param version - advertised server version.
  * @returns an object exposing `fetch(Request)`.
  */
-export function buildMcpHandler(controller, version) {
+export function buildMcpHandler(controller, version, journal) {
     return createMcpHandler(() => {
         const server = new McpServer({ name: SERVER_NAME, version }, { instructions: SERVER_INSTRUCTIONS });
-        registerTools(server, controller);
+        registerTools(server, controller, journal);
         return server;
     });
 }
@@ -110,8 +110,8 @@ async function bind(server, port, host) {
  * @returns the resolved endpoint plus a disposer.
  */
 export async function startEndpoint(options) {
-    const { controller, token, host, port, version, logger } = options;
-    const handler = buildMcpHandler(controller, version);
+    const { controller, token, host, port, version, logger, journal } = options;
+    const handler = buildMcpHandler(controller, version, journal);
     const nodeHandler = toNodeHandler(handler);
     const server = createServer((req, res) => {
         if (!hostIsLoopback(req)) {

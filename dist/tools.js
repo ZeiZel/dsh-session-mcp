@@ -6,6 +6,9 @@
  * the session log (which is what a `dsh --profile sdk`/`acp` resume of a live
  * session would collide with).
  *
+ * Each call is journalled so the Settings page can show what just happened and
+ * which conversation it touched.
+ *
  * @module dsh-session-mcp/tools
  */
 import { randomUUID } from 'node:crypto';
@@ -80,19 +83,66 @@ function fail(error) {
     const message = error instanceof Error ? error.message : String(error);
     return { content: [{ type: 'text', text: message }], isError: true };
 }
+/** First text block of a result, for the journal's failure line. */
+function firstText(result) {
+    const block = result.content?.[0];
+    return typeof block?.text === 'string' ? block.text.slice(0, 400) : 'the tool reported an error';
+}
+/** Read the created conversation id out of a `session_create` result. */
+function createdSessionId(result) {
+    try {
+        const raw = result.content?.[0]?.text;
+        const parsed = JSON.parse(typeof raw === 'string' ? raw : '');
+        if (parsed !== null && typeof parsed === 'object') {
+            const id = parsed.sessionId;
+            if (typeof id === 'string')
+                return id;
+        }
+    }
+    catch {
+        /* A malformed result is already the caller's error. */
+    }
+    return null;
+}
 /**
  * Register the session tools on one MCP server instance.
  * @param server - a fresh `McpServer` for one serving unit.
  * @param controller - the Harness `sessionController` service.
+ * @param journal - bounded request journal the Settings page reads.
  */
-export function registerTools(server, controller) {
+export function registerTools(server, controller, journal) {
+    /**
+     * Run one handler and journal the outcome.
+     * @param tool - wire tool name.
+     * @param run - the handler body.
+     * @param fromResult - whether the addressed conversation comes from the result.
+     */
+    const tracked = (tool, run, fromResult = false) => {
+        return async (args) => {
+            const started = Date.now();
+            const result = await run(args);
+            if (journal !== undefined) {
+                const failed = result.isError === true;
+                const addressed = typeof args?.sessionId === 'string' ? args.sessionId : fromResult ? createdSessionId(result) : null;
+                journal.record({
+                    tool,
+                    at: new Date().toISOString(),
+                    sessionId: addressed,
+                    ok: !failed,
+                    ms: Date.now() - started,
+                    ...(failed ? { error: firstText(result) } : {}),
+                });
+            }
+            return result;
+        };
+    };
     server.registerTool('sessions_list', {
         title: 'List conversations',
         description: 'List DeepSeek Harness conversations with id, title, working directory, running state and token usage. Call this first to discover the sessionId to read or prompt.',
         inputSchema: z.object({
             limit: z.number().int().min(1).max(500).optional().describe('Maximum rows, newest first. Default 50.'),
         }),
-    }, async ({ limit }) => {
+    }, tracked('sessions_list', async ({ limit }) => {
         try {
             const value = await controller.list({}, never());
             const rows = [...(value?.items ?? [])]
@@ -113,7 +163,7 @@ export function registerTools(server, controller) {
         catch (error) {
             return fail(error);
         }
-    });
+    }));
     server.registerTool('session_read', {
         title: 'Read conversation history',
         description: 'Read durable history of one conversation (user, assistant and tool messages). Use beforeSeq to page further back.',
@@ -122,7 +172,7 @@ export function registerTools(server, controller) {
             maxMessages: z.number().int().min(1).max(200).optional().describe('Roughly how many messages. Default 20.'),
             beforeSeq: z.number().int().min(0).optional().describe('Only return events before this sequence number.'),
         }),
-    }, async ({ sessionId, maxMessages, beforeSeq }) => {
+    }, tracked('session_read', async ({ sessionId, maxMessages, beforeSeq }) => {
         try {
             const rows = await controller.list({}, never());
             const cut = (rows?.items ?? []).find((item) => item.sessionId === sessionId)?.projections?.asOfSeq;
@@ -144,7 +194,7 @@ export function registerTools(server, controller) {
         catch (error) {
             return fail(error);
         }
-    });
+    }));
     server.registerTool('session_send', {
         title: 'Send a message into a conversation',
         description: 'Send a user message into an existing conversation. The message joins the live chat a human sees and starts a model turn. mode=queue waits for the current turn, mode=steer interrupts into it.',
@@ -153,7 +203,7 @@ export function registerTools(server, controller) {
             text: z.string().min(1).describe('Message text to deliver.'),
             mode: z.enum(['queue', 'steer']).optional().describe('Delivery mode. Default queue.'),
         }),
-    }, async ({ sessionId, text, mode }) => {
+    }, tracked('session_send', async ({ sessionId, text, mode }) => {
         try {
             if (text.trim().length === 0)
                 throw new Error('text must contain non-whitespace content');
@@ -165,7 +215,7 @@ export function registerTools(server, controller) {
         catch (error) {
             return fail(error);
         }
-    });
+    }));
     server.registerTool('session_create', {
         title: 'Open a new conversation',
         description: 'Open a new blank conversation in the Harness and return its id. Combine with session_send to start work in a fresh chat.',
@@ -173,7 +223,7 @@ export function registerTools(server, controller) {
             cwd: z.string().min(1).optional().describe('Absolute directory the conversation works in.'),
             agentPreset: z.string().min(1).optional().describe('Agent preset name. Omit for the configured default.'),
         }),
-    }, async ({ cwd, agentPreset }) => {
+    }, tracked('session_create', async ({ cwd, agentPreset }) => {
         try {
             const request = {};
             if (cwd !== undefined)
@@ -186,14 +236,14 @@ export function registerTools(server, controller) {
         catch (error) {
             return fail(error);
         }
-    });
+    }, true));
     server.registerTool('session_search', {
         title: 'Search conversations',
         description: 'Full-text search across conversations. Works only when the Harness has the session-query index enabled; otherwise the Host reports that search is disabled.',
         inputSchema: z.object({
             query: z.string().min(1).describe('Search text.'),
         }),
-    }, async ({ query }) => {
+    }, tracked('session_search', async ({ query }) => {
         try {
             const value = await controller.search({ query }, never());
             return ok({ items: value?.items ?? [], hasMore: value?.hasMore === true });
@@ -201,5 +251,5 @@ export function registerTools(server, controller) {
         catch (error) {
             return fail(error);
         }
-    });
+    }));
 }

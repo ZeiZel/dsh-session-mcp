@@ -6,11 +6,15 @@
  * the session log (which is what a `dsh --profile sdk`/`acp` resume of a live
  * session would collide with).
  *
+ * Each call is journalled so the Settings page can show what just happened and
+ * which conversation it touched.
+ *
  * @module dsh-session-mcp/tools
  */
 import { randomUUID } from 'node:crypto'
 import type { CallToolResult, McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
+import type { RequestJournal } from './log.js'
 import type { SessionController, SessionEventRecord } from './types.js'
 
 /** Longest single message body returned to a client. */
@@ -94,12 +98,65 @@ function fail(error: unknown): CallToolResult {
   return { content: [{ type: 'text', text: message }], isError: true }
 }
 
+/** First text block of a result, for the journal's failure line. */
+function firstText(result: CallToolResult): string {
+  const block = result.content?.[0] as { text?: unknown } | undefined
+  return typeof block?.text === 'string' ? block.text.slice(0, 400) : 'the tool reported an error'
+}
+
+/** Read the created conversation id out of a `session_create` result. */
+function createdSessionId(result: CallToolResult): string | null {
+  try {
+    const raw = (result.content?.[0] as { text?: unknown } | undefined)?.text
+    const parsed: unknown = JSON.parse(typeof raw === 'string' ? raw : '')
+    if (parsed !== null && typeof parsed === 'object') {
+      const id = (parsed as { sessionId?: unknown }).sessionId
+      if (typeof id === 'string') return id
+    }
+  } catch {
+    /* A malformed result is already the caller's error. */
+  }
+  return null
+}
+
 /**
  * Register the session tools on one MCP server instance.
  * @param server - a fresh `McpServer` for one serving unit.
  * @param controller - the Harness `sessionController` service.
+ * @param journal - bounded request journal the Settings page reads.
  */
-export function registerTools(server: McpServer, controller: SessionController): void {
+export function registerTools(server: McpServer, controller: SessionController, journal?: RequestJournal): void {
+  /**
+   * Run one handler and journal the outcome.
+   * @param tool - wire tool name.
+   * @param run - the handler body.
+   * @param fromResult - whether the addressed conversation comes from the result.
+   */
+  const tracked = (
+    tool: string,
+    run: (args: any) => Promise<CallToolResult>,
+    fromResult = false,
+  ): ((args: any) => Promise<CallToolResult>) => {
+    return async (args: any): Promise<CallToolResult> => {
+      const started = Date.now()
+      const result = await run(args)
+      if (journal !== undefined) {
+        const failed = result.isError === true
+        const addressed =
+          typeof args?.sessionId === 'string' ? args.sessionId : fromResult ? createdSessionId(result) : null
+        journal.record({
+          tool,
+          at: new Date().toISOString(),
+          sessionId: addressed,
+          ok: !failed,
+          ms: Date.now() - started,
+          ...(failed ? { error: firstText(result) } : {}),
+        })
+      }
+      return result
+    }
+  }
+
   server.registerTool(
     'sessions_list',
     {
@@ -110,7 +167,7 @@ export function registerTools(server: McpServer, controller: SessionController):
         limit: z.number().int().min(1).max(500).optional().describe('Maximum rows, newest first. Default 50.'),
       }),
     },
-    async ({ limit }) => {
+    tracked('sessions_list', async ({ limit }) => {
       try {
         const value = await controller.list({}, never())
         const rows = [...(value?.items ?? [])]
@@ -130,7 +187,7 @@ export function registerTools(server: McpServer, controller: SessionController):
       } catch (error) {
         return fail(error)
       }
-    },
+    }),
   )
 
   server.registerTool(
@@ -145,7 +202,7 @@ export function registerTools(server: McpServer, controller: SessionController):
         beforeSeq: z.number().int().min(0).optional().describe('Only return events before this sequence number.'),
       }),
     },
-    async ({ sessionId, maxMessages, beforeSeq }) => {
+    tracked('session_read', async ({ sessionId, maxMessages, beforeSeq }) => {
       try {
         const rows = await controller.list({}, never())
         const cut = (rows?.items ?? []).find((item) => item.sessionId === sessionId)?.projections?.asOfSeq
@@ -166,7 +223,7 @@ export function registerTools(server: McpServer, controller: SessionController):
       } catch (error) {
         return fail(error)
       }
-    },
+    }),
   )
 
   server.registerTool(
@@ -181,7 +238,7 @@ export function registerTools(server: McpServer, controller: SessionController):
         mode: z.enum(['queue', 'steer']).optional().describe('Delivery mode. Default queue.'),
       }),
     },
-    async ({ sessionId, text, mode }) => {
+    tracked('session_send', async ({ sessionId, text, mode }) => {
       try {
         if (text.trim().length === 0) throw new Error('text must contain non-whitespace content')
         const requestId = randomUUID()
@@ -194,7 +251,7 @@ export function registerTools(server: McpServer, controller: SessionController):
       } catch (error) {
         return fail(error)
       }
-    },
+    }),
   )
 
   server.registerTool(
@@ -208,17 +265,21 @@ export function registerTools(server: McpServer, controller: SessionController):
         agentPreset: z.string().min(1).optional().describe('Agent preset name. Omit for the configured default.'),
       }),
     },
-    async ({ cwd, agentPreset }) => {
-      try {
-        const request: Record<string, unknown> = {}
-        if (cwd !== undefined) request.cwd = cwd
-        if (agentPreset !== undefined) request.agentPreset = agentPreset
-        const value = await controller.create(request)
-        return ok({ sessionId: value?.sessionId ?? null, agentPreset: value?.agentPreset ?? null })
-      } catch (error) {
-        return fail(error)
-      }
-    },
+    tracked(
+      'session_create',
+      async ({ cwd, agentPreset }) => {
+        try {
+          const request: Record<string, unknown> = {}
+          if (cwd !== undefined) request.cwd = cwd
+          if (agentPreset !== undefined) request.agentPreset = agentPreset
+          const value = await controller.create(request)
+          return ok({ sessionId: value?.sessionId ?? null, agentPreset: value?.agentPreset ?? null })
+        } catch (error) {
+          return fail(error)
+        }
+      },
+      true,
+    ),
   )
 
   server.registerTool(
@@ -231,13 +292,13 @@ export function registerTools(server: McpServer, controller: SessionController):
         query: z.string().min(1).describe('Search text.'),
       }),
     },
-    async ({ query }) => {
+    tracked('session_search', async ({ query }) => {
       try {
         const value = await controller.search({ query }, never())
         return ok({ items: value?.items ?? [], hasMore: value?.hasMore === true })
       } catch (error) {
         return fail(error)
       }
-    },
+    }),
   )
 }
