@@ -44,6 +44,51 @@ export interface PromptContentPart {
     readonly type: 'text';
     readonly text: string;
 }
+/** One reasoning effort a model route accepts. */
+export interface ModelEffort {
+    readonly id: string;
+    readonly name: string;
+    readonly description?: string;
+}
+/** One selectable model inside a provider group. */
+export interface CatalogModel {
+    readonly id: string;
+    readonly name: string;
+    readonly description?: string;
+    readonly reasoning?: {
+        readonly efforts?: readonly ModelEffort[];
+        readonly defaultEffort?: string;
+    };
+}
+/** One provider with its loaded catalog. */
+export interface CatalogProvider {
+    readonly id: string;
+    readonly name: string;
+    readonly models: readonly CatalogModel[];
+}
+/** One provider whose catalog lookup failed. */
+export interface CatalogFailure {
+    readonly id: string;
+    readonly name: string;
+    readonly message: string;
+}
+/** The Host-generation model catalog. */
+export interface ModelCatalog {
+    readonly default?: {
+        readonly provider: string;
+        readonly model: string;
+        readonly reasoningEffort?: string;
+    };
+    readonly routableProviders?: readonly string[];
+    readonly groups?: readonly CatalogProvider[];
+    readonly failures?: readonly CatalogFailure[];
+}
+/** One durable Session projection read. */
+export interface Projections {
+    readonly kind?: string;
+    readonly asOfSeq?: number;
+    readonly values?: Record<string, unknown>;
+}
 /** The controller surface used by the MCP tools. */
 export interface SessionController {
     list(request: Record<string, never>, signal: AbortSignal): Promise<{
@@ -65,9 +110,39 @@ export interface SessionController {
     }>;
     projections(request: {
         sessionId: string;
-    }, signal: AbortSignal): Promise<{
-        asOfSeq?: number;
-    } | null>;
+    }, signal: AbortSignal): Promise<Projections | null>;
+    rename(request: {
+        sessionId: string;
+        title: string;
+    }): Promise<{
+        title?: string;
+        seq?: number;
+    }>;
+    fork(request: {
+        sessionId: string;
+        atSeq?: number;
+        allowMigration?: boolean;
+    }): Promise<{
+        sessionId?: string;
+    }>;
+    cancel(request: {
+        sessionId: string;
+    }): {
+        accepted?: boolean;
+    };
+    modelCatalog(): Promise<ModelCatalog>;
+    selectModel(request: {
+        sessionId: string;
+        provider: string;
+        model: string;
+        reasoningEffort?: string;
+    }): Promise<{
+        selected?: {
+            provider?: string;
+            model?: string;
+            reasoningEffort?: string;
+        };
+    }>;
 }
 /** Minimal logger surface shared by Cordis and this package's tests. */
 export interface PluginLogger {

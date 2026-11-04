@@ -252,4 +252,138 @@ export function registerTools(server, controller, journal) {
             return fail(error);
         }
     }));
+    server.registerTool('session_inspect', {
+        title: 'Inspect one conversation',
+        description: 'Vitals of one conversation: title, run state, token usage, context pressure, pending queue, selected model and goal. Cheaper than reading history when you only need its state.',
+        inputSchema: z.object({
+            sessionId: z.string().min(1).describe('Conversation id from sessions_list.'),
+        }),
+    }, tracked('session_inspect', async ({ sessionId }) => {
+        try {
+            const rows = await controller.list({}, never());
+            const row = (rows?.items ?? []).find((item) => item.sessionId === sessionId);
+            const projections = await controller.projections({ sessionId }, never());
+            if (projections === null)
+                throw new Error(`Session ${sessionId} not found`);
+            const values = (projections.values ?? {});
+            return ok({
+                sessionId,
+                title: values.title ?? null,
+                running: row?.running === true,
+                agentAvailable: row?.agentAvailable === true,
+                cwd: row?.cwd ?? null,
+                tokens: values.tokenUsage ?? null,
+                contextPressure: values.contextPressure ?? null,
+                contextBreakdown: values.contextBreakdown ?? null,
+                sessionStats: values.sessionStats ?? null,
+                inbox: values.inbox ?? null,
+                model: values.modelSelection ?? null,
+                goal: values.goal ?? null,
+            });
+        }
+        catch (error) {
+            return fail(error);
+        }
+    }));
+    server.registerTool('session_rename', {
+        title: 'Rename a conversation',
+        description: 'Set the title of one conversation. Returns the normalized title and the event position that committed it.',
+        inputSchema: z.object({
+            sessionId: z.string().min(1).describe('Conversation id from sessions_list.'),
+            title: z.string().min(1).max(200).describe('New title.'),
+        }),
+    }, tracked('session_rename', async ({ sessionId, title }) => {
+        try {
+            const value = await controller.rename({ sessionId, title });
+            return ok({ sessionId, title: value?.title ?? title, seq: value?.seq ?? null });
+        }
+        catch (error) {
+            return fail(error);
+        }
+    }));
+    server.registerTool('session_fork', {
+        title: 'Fork a conversation',
+        description: 'Copy a conversation prefix into a new conversation and return its id. Omit atSeq to fork at the latest completed turn — useful to branch off an alternative approach without disturbing the original.',
+        inputSchema: z.object({
+            sessionId: z.string().min(1).describe('Conversation id from sessions_list.'),
+            atSeq: z.number().int().min(0).optional().describe('Exact inclusive source event seq to cut at.'),
+        }),
+    }, tracked('session_fork', async ({ sessionId, atSeq }) => {
+        try {
+            const request = { sessionId };
+            if (atSeq !== undefined)
+                request.atSeq = atSeq;
+            const value = await controller.fork(request);
+            return ok({ sourceSessionId: sessionId, sessionId: value?.sessionId ?? null });
+        }
+        catch (error) {
+            return fail(error);
+        }
+    }));
+    server.registerTool('session_cancel', {
+        title: 'Stop a running turn',
+        description: 'Ask the Host to cancel the turn a conversation is currently running. Pending inbox work is retained, so a queued message is not lost.',
+        inputSchema: z.object({
+            sessionId: z.string().min(1).describe('Conversation id from sessions_list.'),
+        }),
+    }, tracked('session_cancel', async ({ sessionId }) => {
+        try {
+            const value = await controller.cancel({ sessionId });
+            return ok({ sessionId, accepted: value?.accepted === true });
+        }
+        catch (error) {
+            return fail(error);
+        }
+    }));
+    server.registerTool('models_list', {
+        title: 'List available models',
+        description: 'Every model route this harness can currently reach, grouped by provider, with the reasoning efforts each accepts and the deployment default. Call before session_select_model.',
+        inputSchema: z.object({}),
+    }, tracked('models_list', async () => {
+        try {
+            const catalog = await controller.modelCatalog();
+            return ok({
+                default: catalog?.default ?? null,
+                providers: (catalog?.groups ?? []).map((group) => ({
+                    id: group.id,
+                    name: group.name,
+                    models: (group.models ?? []).map((model) => ({
+                        id: model.id,
+                        name: model.name,
+                        description: model.description ?? null,
+                        reasoningEfforts: (model.reasoning?.efforts ?? []).map((effort) => effort.id),
+                        defaultReasoningEffort: model.reasoning?.defaultEffort ?? null,
+                    })),
+                })),
+                unavailable: (catalog?.failures ?? []).map((failure) => ({
+                    provider: failure.id,
+                    message: failure.message,
+                })),
+            });
+        }
+        catch (error) {
+            return fail(error);
+        }
+    }));
+    server.registerTool('session_select_model', {
+        title: 'Choose the model for a conversation',
+        description: 'Pin one provider/model route (and optional reasoning effort) to a conversation. Use models_list first: an unavailable pair is rejected with session/model-unavailable.',
+        inputSchema: z.object({
+            sessionId: z.string().min(1).describe('Conversation id from sessions_list.'),
+            provider: z.string().min(1).describe('Provider id from models_list.'),
+            model: z.string().min(1).describe('Model id from models_list.'),
+            reasoningEffort: z.string().min(1).optional().describe('Reasoning effort id the route accepts.'),
+        }),
+    }, tracked('session_select_model', async ({ sessionId, provider, model, reasoningEffort }) => {
+        try {
+            const request = { sessionId, provider, model };
+            if (reasoningEffort !== undefined)
+                request.reasoningEffort = reasoningEffort;
+            const value = await controller.selectModel(request);
+            return ok({ sessionId, selected: value?.selected ?? null });
+        }
+        catch (error) {
+            return fail(error);
+        }
+    }));
 }

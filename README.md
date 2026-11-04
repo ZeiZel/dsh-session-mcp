@@ -1,12 +1,14 @@
 # @nones/dsh-session-mcp
 
 MCP (Model Context Protocol) server for **DeepSeek Harness sessions** — lets Claude Code,
-Claude Desktop, Codex, Cursor and any other MCP client list, read and prompt the
-conversations running in your harness.
+Claude Desktop, Codex, Cursor and any other MCP client work with the conversations running
+in your harness: list them, read them, prompt them, branch them, stop them, retitle them,
+switch their model.
 
 Ships as a DeepSeek Harness plugin: installing the bundle starts a bearer-authenticated MCP
-endpoint **together with the harness** and writes a ready-to-paste client config. No
-sidecar process to babysit, no port to guess, and no second writer on the session log.
+endpoint **together with the harness**, publishes a copy-ready client config, and adds a
+**Settings → MCP** page with live status, the last few requests and every snippet you need.
+No sidecar process to babysit, no port to guess, no second writer on the session log.
 
 ```
 ┌──────────────────┐   Bearer token    ┌──────────────────────────────┐
@@ -47,13 +49,63 @@ bun add github:ZeiZel/dsh-session-mcp
 
 Restart the harness (or reload the profile) and the endpoint starts with it.
 
-## Get your config
+> The Host half (endpoint, tools, config route) is live as soon as the bundle installs. The
+> **Client half** — the Settings page — is composed into the browser module roster at boot,
+> so it appears after the next harness start.
 
-Open **Settings → MCP** in the harness. The page shows:
+## Tools
 
-- **Status** — listening, uptime, total requests, and the last failure when one happened
+Eleven tools. Everything is scoped to this harness: no other instance is reachable.
+
+### Conversations
+
+| Tool | What it does |
+|---|---|
+| `sessions_list` | Conversations with id, title, working directory, run state and token usage. Start here. |
+| `session_read` | Durable history — user, assistant and tool messages — pageable back with `beforeSeq`. |
+| `session_inspect` | Vitals of one conversation: title, run state, tokens, context pressure, context breakdown, pending queue, selected model, goal. |
+| `session_search` | Full-text search. Only works when the harness enables the session-query index; otherwise the host reports it is disabled. |
+
+### Acting on a conversation
+
+| Tool | What it does |
+|---|---|
+| `session_send` | Deliver a user message into a live conversation (`queue` waits for the current turn, `steer` interrupts into it) and start a model turn. |
+| `session_create` | Open a new blank conversation, optionally in a given `cwd` or `agentPreset`. |
+| `session_rename` | Set the conversation title; returns the committed title and event position. |
+| `session_fork` | Copy a prefix into a new conversation — branch off an alternative approach without touching the original. Omit `atSeq` to fork at the latest completed turn. |
+| `session_cancel` | Stop the turn a conversation is running. Pending inbox work is kept, so a queued message is not lost. |
+
+### Models
+
+| Tool | What it does |
+|---|---|
+| `models_list` | Every reachable provider/model route, the reasoning efforts each accepts, and the deployment default. |
+| `session_select_model` | Pin one provider/model route (and optional reasoning effort) to a conversation. |
+
+### A typical loop
+
+```
+sessions_list          → find the conversation
+session_inspect        → is it running? how full is the context?
+session_send           → queue the next instruction
+session_read           → check what the agent answered
+```
+
+Branching instead of hijacking:
+
+```
+session_fork  { sessionId, atSeq }   → new conversation id
+session_send  { sessionId: <new> }   → try the alternative there
+```
+
+## Settings → MCP
+
+The harness renders a dedicated settings page. It shows:
+
+- **Status** — listening, uptime, total requests served, and the last failure when one happened
 - **Recent requests** — the newest five tool calls: what ran, when, the conversation it
-  addressed, and whether it succeeded (with duration)
+  addressed (title, with the id on hover), and whether it succeeded, with duration
 - the live endpoint and the bearer token (masked until you reveal it)
 - three copy-ready blocks:
 
@@ -67,7 +119,8 @@ Each block has its own **Copy** button; the endpoint and the token have one too.
 refreshes every 10 seconds while it is open.
 
 Only the last five calls are kept — the plugin is not a log store, and schema-rejected
-calls (wrong arguments) never reach a tool, so they are not journalled.
+calls (wrong arguments) never reach a tool, so they are not journalled. Conversation titles
+come from one `session/list` read per page load, so the journal itself stays cheap.
 
 The same data is on disk at `$DSH_HOME/state/dsh-session-mcp.json`:
 
@@ -87,7 +140,7 @@ The same data is on disk at `$DSH_HOME/state/dsh-session-mcp.json`:
 }
 ```
 
-Per client:
+## Connect a client
 
 **Claude Code**
 
@@ -123,16 +176,6 @@ Authorization = "Bearer <token>"
 Older clients that only speak the 2025 revisions still work: the endpoint serves the modern
 revision and falls back to stateless serving for 2025-era traffic.
 
-## Tools
-
-| Tool | Description |
-|---|---|
-| `sessions_list` | Conversations with id, title, working directory, running state, token usage |
-| `session_read` | Durable history (user / assistant / tool), pageable back with `beforeSeq` |
-| `session_send` | Deliver a user message into a conversation (`queue` or `steer`) |
-| `session_create` | Open a new blank conversation and return its id |
-| `session_search` | Full-text search — only when the harness enables the session-query index |
-
 ## Security
 
 - Binds **loopback only** (`127.0.0.1`) and rejects non-loopback `Host` headers.
@@ -140,8 +183,10 @@ revision and falls back to stateless serving for 2025-era traffic.
 - The token is 32 random bytes, generated once, stored `0600` at
   `$DSH_HOME/state/dsh-session-mcp.json`, and reused across restarts so pasted client
   configs keep working.
-- **Rotate** by deleting that file and restarting the harness. Every client then needs the
-  new token.
+- The Settings page reads its data from `/api/dsh-session-mcp/config` over the
+  authenticated browser channel, so the token never enters the served HTML.
+- **Rotate** by deleting the state file and restarting the harness. Every client then needs
+  the new token.
 - Never expose this endpoint through a proxy or a tunnel: the bearer is the only thing
   between a client and every conversation you have.
 
@@ -162,34 +207,29 @@ Written in TypeScript, compiled to `dist/` (committed, so installs need no build
 |---|---|
 | `src/index.ts` | Cordis plugin: reads/creates the bearer, starts the listener, publishes the state file, serves the Settings config route, closes the listener on unload |
 | `src/server.ts` | `node:http` listener with the bearer gate in front of the official SDK's `createMcpHandler` + `toNodeHandler` |
-| `src/tools.ts` | The five tools, backed directly by `ctx.sessionController` |
+| `src/tools.ts` | The eleven tools, backed directly by `ctx.sessionController` |
+| `src/log.ts` | Bounded journal of the last five calls |
 | `src/config.ts` | Token persistence, constant-time bearer comparison, client snippets |
 | `src/client.ts` | The **Settings → MCP** page (classic script for `window.__ModuleLoader__`) |
 | `src/types.ts` | The narrow structural slice of Harness types this package needs |
 
-The Settings page reads `/api/dsh-session-mcp/config` over the authenticated browser
-channel, so the token never enters the served HTML.
+## Releases
 
-> **After installing**, restart the harness once: the browser module roster is composed
-> from the packages present at boot, so a newly installed Client half appears on the next
-> start.
-
-## Development
+Publishing is automatic: pushing a `v*` tag makes GitHub Actions build the package, publish
+it to npm with a **signed provenance** statement, and cut a GitHub release.
 
 ```bash
-bun install
-bun run typecheck   # tsc --noEmit
-bun run build       # tsc -> dist/
+npm version patch --no-git-tag-version
+git commit -am "chore(release): 1.3.1"
+git tag v1.3.1
+git push origin master --tags
 ```
 
-Requires Node ≥ 20. Runtime dependencies: `@modelcontextprotocol/server`,
-`@modelcontextprotocol/node`, `zod`. Dev: `typescript`, `@types/node`.
+The workflow requires one repository secret, `NPM_TOKEN` (npm automation token).
 
-`dist/` is committed so `bun add github:ZeiZel/dsh-session-mcp` and
-`dsh plugin add <dir>` work without a build step; `prepublishOnly` rebuilds it for npm.
+## Contributing
 
-Releases: push a `v*` tag and the `release` workflow builds, publishes to npm and cuts a
-GitHub release.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
