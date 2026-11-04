@@ -5,7 +5,7 @@ name: release
 #   git tag v1.2.3 && git push origin v1.2.3
 #
 # Requires one repository secret:
-#   NPM_TOKEN — an npm automation token with publish rights on `dsh-session-mcp`.
+#   NPM_TOKEN — an npm automation token with publish rights on @nones/dsh-session-mcp.
 
 on:
   push:
@@ -25,6 +25,11 @@ jobs:
         with:
           bun-version: latest
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
       - name: Install
         run: bun install --frozen-lockfile
 
@@ -42,13 +47,13 @@ jobs:
             exit 1
           fi
 
+      # npm, not bun: bun's publisher stages new versions behind npm's staged
+      # publishing, which leaves a 0.0.0-stage placeholder and blocks the real
+      # version until it is approved.
       - name: Publish to npm
         env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > .npmrc
-          bun publish --access public
-          rm -f .npmrc
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish
 
       - name: GitHub release
         env:
