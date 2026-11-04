@@ -20,6 +20,15 @@ import type { PluginLogger, SessionController } from './types.js'
 /** Path the MCP endpoint answers on. */
 export const MCP_PATH = '/mcp'
 
+/** Description every client receives during `initialize`. */
+export const SERVER_INSTRUCTIONS = [
+  'This server exposes one running DeepSeek Harness instance: its conversations, their durable history,',
+  'and the ability to deliver a new user message into a live conversation.',
+  'Start with sessions_list to discover conversation ids, then session_read to inspect history,',
+  'or session_send to deliver a message. session_send joins the chat a human is watching and starts a',
+  'model turn, so send complete, deliberate messages rather than fragments.',
+].join(' ')
+
 /** Loopback hostnames accepted in the Host header. */
 const LOOPBACK = new Set(['127.0.0.1', '::1', 'localhost', '[::1]'])
 
@@ -48,7 +57,7 @@ export interface StartEndpointOptions {
  */
 export function buildMcpHandler(controller: SessionController, version: string) {
   return createMcpHandler(() => {
-    const server = new McpServer({ name: SERVER_NAME, version })
+    const server = new McpServer({ name: SERVER_NAME, version }, { instructions: SERVER_INSTRUCTIONS })
     registerTools(server, controller)
     return server
   })

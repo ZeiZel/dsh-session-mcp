@@ -6,6 +6,6 @@
 # the resolved URL.
 - insert:
     - id: dsh-session-mcp
-      name: dsh-session-mcp
+      name: '@nones/dsh-session-mcp'
       config:
         port: 7801

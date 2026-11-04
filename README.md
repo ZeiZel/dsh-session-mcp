@@ -1,23 +1,24 @@
-# dsh-session-mcp
+# @nones/dsh-session-mcp
 
-**MCP server for DeepSeek Harness sessions.** Let Claude, Codex, Cursor — or another
-DeepSeek Harness — list, read and prompt the conversations running in your harness.
+MCP (Model Context Protocol) server for **DeepSeek Harness sessions** — lets Claude Code,
+Claude Desktop, Codex, Cursor and any other MCP client list, read and prompt the
+conversations running in your harness.
 
-The plugin starts a bearer-authenticated MCP endpoint together with the harness and writes
-you a ready-to-paste client config. There is no separate process to babysit, no port to
-guess, and no second writer on the session log.
+Ships as a DeepSeek Harness plugin: installing the bundle starts a bearer-authenticated MCP
+endpoint **together with the harness** and writes a ready-to-paste client config. No
+sidecar process to babysit, no port to guess, and no second writer on the session log.
 
 ```
-┌──────────────────┐   Bearer token    ┌─────────────────────────────┐
-│  Claude / Codex  │ ────────────────► │  http://127.0.0.1:7801/mcp  │
-│  Cursor / other  │ ◄──────────────── │  inside the Harness process │
-└──────────────────┘   MCP over HTTP   └──────────────┬──────────────┘
-                                                     │ in-process
-                                                     ▼
-                                          ┌─────────────────────┐
-                                          │  sessionController  │
-                                          │  list / page / …    │
-                                          └─────────────────────┘
+┌──────────────────┐   Bearer token    ┌──────────────────────────────┐
+│  Claude / Codex  │ ────────────────► │  http://127.0.0.1:7801/mcp   │
+│  Cursor / other  │ ◄──────────────── │  inside the Harness process  │
+└──────────────────┘   MCP over HTTP   └───────────────┬──────────────┘
+                                                      │ in-process
+                                                      ▼
+                                           ┌─────────────────────┐
+                                           │  sessionController  │
+                                           │  list / page / …    │
+                                           └─────────────────────┘
 ```
 
 ## Why
@@ -34,15 +35,14 @@ copy of it.
 ## Install
 
 ```bash
-# in your harness profile
-dsh plugin --profile desktop add dsh-session-mcp
+dsh plugin --profile desktop add @nones/dsh-session-mcp
 ```
 
-or from a checkout:
+From a checkout or straight from git:
 
 ```bash
-bun install
 dsh plugin --profile desktop add /absolute/path/to/dsh-session-mcp
+bun add github:ZeiZel/dsh-session-mcp
 ```
 
 Restart the harness (or reload the profile) and the endpoint starts with it.
@@ -94,12 +94,14 @@ claude mcp add --transport http dsh-sessions http://127.0.0.1:7801/mcp \
 }
 ```
 
-**Codex**
+**Codex** (`~/.codex/config.toml`)
 
 ```toml
 [mcp_servers.dsh-sessions]
 url = "http://127.0.0.1:7801/mcp"
-http_headers = { Authorization = "Bearer <token>" }
+
+[mcp_servers.dsh-sessions.http_headers]
+Authorization = "Bearer <token>"
 ```
 
 Older clients that only speak the 2025 revisions still work: the endpoint serves the modern
@@ -161,6 +163,9 @@ Requires Node ≥ 20. Runtime dependencies: `@modelcontextprotocol/server`,
 
 `dist/` is committed so `bun add github:ZeiZel/dsh-session-mcp` and
 `dsh plugin add <dir>` work without a build step; `prepublishOnly` rebuilds it for npm.
+
+Releases: push a `v*` tag and the `release` workflow builds, publishes to npm and cuts a
+GitHub release.
 
 ## License
 

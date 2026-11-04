@@ -1,6 +1,8 @@
 import type { PluginLogger, SessionController } from './types.js';
 /** Path the MCP endpoint answers on. */
 export declare const MCP_PATH = "/mcp";
+/** Description every client receives during `initialize`. */
+export declare const SERVER_INSTRUCTIONS: string;
 /** A running endpoint. */
 export interface RunningEndpoint {
     readonly url: string;

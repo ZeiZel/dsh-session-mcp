@@ -1,7 +1,7 @@
 {
-  "name": "dsh-session-mcp",
-  "version": "1.0.0",
-  "description": "MCP server for DeepSeek Harness sessions: list, read and prompt live conversations from any MCP client, over a bearer-authenticated HTTP endpoint the harness starts for you.",
+  "name": "@nones/dsh-session-mcp",
+  "version": "1.0.1",
+  "description": "MCP server for DeepSeek Harness sessions — list, read and prompt live conversations from any MCP client",
   "type": "module",
   "license": "MIT",
   "author": "ZeiZel <valera2003lvov@yandex.ru>",
@@ -10,11 +10,19 @@
     "url": "git+https://github.com/ZeiZel/dsh-session-mcp.git"
   },
   "homepage": "https://github.com/ZeiZel/dsh-session-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/ZeiZel/dsh-session-mcp/issues"
+  },
   "keywords": [
-    "dsh",
     "deepseek-harness",
+    "dsh",
     "mcp",
     "model-context-protocol",
+    "ai-agents",
+    "sessions",
+    "claude",
+    "codex",
+    "cursor",
     "plugin",
     "bundle"
   ],
@@ -51,6 +59,10 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prepublishOnly": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "dependencies": {
     "@modelcontextprotocol/node": "^2.1.2",
