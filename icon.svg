@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="DSH Session MCP Bridge">
+  <g fill="none" stroke="#2f6f4e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="6" y="14" width="22" height="36" rx="5"/>
+    <rect x="36" y="14" width="22" height="36" rx="5"/>
+    <path d="M28 26h8M28 38h8"/>
+    <path d="M14 24h6M14 32h6M14 40h6"/>
+    <path d="M44 24h6M44 32h6M44 40h6"/>
+  </g>
+</svg>

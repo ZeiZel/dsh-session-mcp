@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Session MCP Server",
+    "description": "Starts a bearer-authenticated MCP endpoint with the Harness so other agents can list, read and prompt your conversations."
+  }
+}

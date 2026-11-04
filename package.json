@@ -1,0 +1,51 @@
+{
+  "name": "dsh-session-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for DeepSeek Harness sessions: list, read and prompt live conversations from any MCP client, over a bearer-authenticated HTTP endpoint the harness starts for you.",
+  "type": "module",
+  "license": "MIT",
+  "author": "ZeiZel <valera2003lvov@yandex.ru>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ZeiZel/dsh-session-mcp.git"
+  },
+  "homepage": "https://github.com/ZeiZel/dsh-session-mcp#readme",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "mcp",
+    "model-context-protocol",
+    "plugin",
+    "bundle"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    ".": "./host/index.js",
+    "./host": "./host/index.js",
+    "./server": "./host/server.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "host/index.js",
+    "host/server.js",
+    "host/tools.js",
+    "host/config.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/node": "^2.1.2",
+    "@modelcontextprotocol/server": "^2.4.0",
+    "zod": "^4.6.7"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

@@ -1,0 +1,11 @@
+# dsh-session-mcp bundle patch.
+#
+# One row: the Host plugin that starts the bearer-authenticated MCP endpoint with
+# the Harness and publishes the client configuration. `port` is the preferred
+# loopback port; if it is taken the plugin binds an ephemeral one and republishes
+# the resolved URL.
+- insert:
+    - id: dsh-session-mcp
+      name: dsh-session-mcp
+      config:
+        port: 7801
