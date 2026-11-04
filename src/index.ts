@@ -15,12 +15,15 @@
 import { readFileSync } from 'node:fs'
 import {
   clientConfig,
+  CONFIG_ROUTE_PATH,
   createToken,
   DEFAULT_HOST,
   DEFAULT_PORT,
   readState,
   SERVER_NAME,
+  snippetsFor,
   writeState,
+  type ConfigPayload,
   type EndpointState,
 } from './config.js'
 import { startEndpoint } from './server.js'
@@ -111,6 +114,33 @@ export async function apply(ctx: PluginContext, config?: Config): Promise<void> 
   ctx.logger?.info?.(`dsh-session-mcp: bearer token and client config in ${file}`)
   console.log(`dsh-session-mcp: ${endpoint.url} (bearer in ${file})`)
   console.log(JSON.stringify(state.client, null, 2))
+
+  // The Settings page reads the live config over the authenticated `/api`
+  // channel, so the token never enters the served HTML.
+  const payload: ConfigPayload = {
+    name: SERVER_NAME,
+    url: endpoint.url,
+    host,
+    port: endpoint.port,
+    token,
+    updatedAt: state.updatedAt,
+    snippets: snippetsFor(endpoint.url, token),
+  }
+  ctx.inject(['connection'], (connectionCtx) => {
+    connectionCtx.connection.fetch.register({
+      path: CONFIG_ROUTE_PATH,
+      methods: ['GET'],
+      requestBody: 'buffered',
+      fetch: async () =>
+        new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json; charset=utf-8',
+            'cache-control': 'no-store',
+          },
+        }),
+    })
+  })
 
   ctx.effect(
     () => () => {

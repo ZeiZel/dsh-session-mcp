@@ -153,3 +153,48 @@ export function clientConfig(url: string, token: string): ClientConfig {
     },
   }
 }
+
+/** Path of the authenticated config route the Settings page reads. */
+export const CONFIG_ROUTE_PATH = '/api/dsh-session-mcp/config'
+
+/** Every snippet the Settings page offers for copying. */
+export interface ConfigSnippets {
+  /** `mcpServers` JSON for Claude Desktop, Cursor and other JSON clients. */
+  readonly json: string
+  /** `~/.codex/config.toml` block. */
+  readonly codexToml: string
+  /** One `claude mcp add` command. */
+  readonly claudeCode: string
+}
+
+/**
+ * Render the copy-paste snippets for one endpoint.
+ * @param url - full MCP endpoint URL.
+ * @param token - bearer token.
+ * @returns the three snippets the Settings page shows.
+ */
+export function snippetsFor(url: string, token: string): ConfigSnippets {
+  return {
+    json: JSON.stringify(clientConfig(url, token), null, 2),
+    codexToml: [
+      `[mcp_servers.${CLIENT_KEY}]`,
+      `url = "${url}"`,
+      '',
+      `[mcp_servers.${CLIENT_KEY}.http_headers]`,
+      `Authorization = "Bearer ${token}"`,
+    ].join('\n'),
+    claudeCode: `claude mcp add --transport http ${CLIENT_KEY} ${url} --header "Authorization: Bearer ${token}"`,
+  }
+}
+
+/** What the Settings page receives from the Host. */
+export interface ConfigPayload {
+  readonly name: string
+  readonly url: string
+  readonly host: string
+  readonly port: number
+  readonly token: string
+  readonly updatedAt: string
+  readonly snippets: ConfigSnippets
+}
+

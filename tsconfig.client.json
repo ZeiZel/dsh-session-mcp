@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "verbatimModuleSyntax": false,
+    "module": "ES2022",
+    "moduleResolution": "Bundler"
+  },
+  "include": ["src/client.ts"],
+  "exclude": []
+}

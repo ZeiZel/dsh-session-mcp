@@ -13,7 +13,7 @@
  * @module dsh-session-mcp
  */
 import { readFileSync } from 'node:fs';
-import { clientConfig, createToken, DEFAULT_HOST, DEFAULT_PORT, readState, SERVER_NAME, writeState, } from './config.js';
+import { clientConfig, CONFIG_ROUTE_PATH, createToken, DEFAULT_HOST, DEFAULT_PORT, readState, SERVER_NAME, snippetsFor, writeState, } from './config.js';
 import { startEndpoint } from './server.js';
 /** Stable Cordis plugin name. */
 export const name = 'dsh-session-mcp';
@@ -85,6 +85,31 @@ export async function apply(ctx, config) {
     ctx.logger?.info?.(`dsh-session-mcp: bearer token and client config in ${file}`);
     console.log(`dsh-session-mcp: ${endpoint.url} (bearer in ${file})`);
     console.log(JSON.stringify(state.client, null, 2));
+    // The Settings page reads the live config over the authenticated `/api`
+    // channel, so the token never enters the served HTML.
+    const payload = {
+        name: SERVER_NAME,
+        url: endpoint.url,
+        host,
+        port: endpoint.port,
+        token,
+        updatedAt: state.updatedAt,
+        snippets: snippetsFor(endpoint.url, token),
+    };
+    ctx.inject(['connection'], (connectionCtx) => {
+        connectionCtx.connection.fetch.register({
+            path: CONFIG_ROUTE_PATH,
+            methods: ['GET'],
+            requestBody: 'buffered',
+            fetch: async () => new Response(JSON.stringify(payload), {
+                status: 200,
+                headers: {
+                    'content-type': 'application/json; charset=utf-8',
+                    'cache-control': 'no-store',
+                },
+            }),
+        });
+    });
     ctx.effect(() => () => {
         void endpoint.close();
     }, 'dsh-session-mcp: endpoint lifetime');

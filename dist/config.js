@@ -120,3 +120,24 @@ export function clientConfig(url, token) {
         },
     };
 }
+/** Path of the authenticated config route the Settings page reads. */
+export const CONFIG_ROUTE_PATH = '/api/dsh-session-mcp/config';
+/**
+ * Render the copy-paste snippets for one endpoint.
+ * @param url - full MCP endpoint URL.
+ * @param token - bearer token.
+ * @returns the three snippets the Settings page shows.
+ */
+export function snippetsFor(url, token) {
+    return {
+        json: JSON.stringify(clientConfig(url, token), null, 2),
+        codexToml: [
+            `[mcp_servers.${CLIENT_KEY}]`,
+            `url = "${url}"`,
+            '',
+            `[mcp_servers.${CLIENT_KEY}.http_headers]`,
+            `Authorization = "Bearer ${token}"`,
+        ].join('\n'),
+        claudeCode: `claude mcp add --transport http ${CLIENT_KEY} ${url} --header "Authorization: Bearer ${token}"`,
+    };
+}

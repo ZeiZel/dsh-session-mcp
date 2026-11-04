@@ -49,11 +49,18 @@ Restart the harness (or reload the profile) and the endpoint starts with it.
 
 ## Get your config
 
-The harness writes everything to:
+Open **Settings → MCP** in the harness. The page shows the live endpoint, the bearer
+token (masked until you reveal it), and three copy-ready blocks:
 
-```
-$DSH_HOME/state/dsh-session-mcp.json
-```
+| Block | For |
+|---|---|
+| JSON — `mcpServers` | Claude Desktop, Cursor, and any JSON-configured client |
+| Codex — `~/.codex/config.toml` | Codex CLI / IDE |
+| Claude Code — CLI | One `claude mcp add …` command |
+
+Each block has its own **Copy** button; the endpoint and the token have one too.
+
+The same data is on disk at `$DSH_HOME/state/dsh-session-mcp.json`:
 
 ```json
 {
@@ -71,7 +78,7 @@ $DSH_HOME/state/dsh-session-mcp.json
 }
 ```
 
-Copy the `client` block into your MCP client. Per client:
+Per client:
 
 **Claude Code**
 
@@ -144,11 +151,19 @@ Written in TypeScript, compiled to `dist/` (committed, so installs need no build
 
 | Source | Role |
 |---|---|
-| `src/index.ts` | Cordis plugin: reads/creates the bearer, starts the listener, publishes the state file, closes the listener on unload |
+| `src/index.ts` | Cordis plugin: reads/creates the bearer, starts the listener, publishes the state file, serves the Settings config route, closes the listener on unload |
 | `src/server.ts` | `node:http` listener with the bearer gate in front of the official SDK's `createMcpHandler` + `toNodeHandler` |
 | `src/tools.ts` | The five tools, backed directly by `ctx.sessionController` |
-| `src/config.ts` | Token persistence, constant-time bearer comparison, client snippet |
+| `src/config.ts` | Token persistence, constant-time bearer comparison, client snippets |
+| `src/client.ts` | The **Settings → MCP** page (classic script for `window.__ModuleLoader__`) |
 | `src/types.ts` | The narrow structural slice of Harness types this package needs |
+
+The Settings page reads `/api/dsh-session-mcp/config` over the authenticated browser
+channel, so the token never enters the served HTML.
+
+> **After installing**, restart the harness once: the browser module roster is composed
+> from the packages present at boot, so a newly installed Client half appears on the next
+> start.
 
 ## Development
 

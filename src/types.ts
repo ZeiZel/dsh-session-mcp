@@ -70,4 +70,21 @@ export interface PluginContext {
   readonly sessionController: SessionController
   readonly logger?: PluginLogger
   effect(setup: () => () => void, label?: string): void
+  inject(deps: readonly string[], callback: (ctx: ConnectionContext) => void): void
 }
+
+/** One exact Fetch route on the authenticated `/api` channel. */
+export interface FetchRoute {
+  readonly path: string
+  readonly methods: readonly string[]
+  readonly requestBody: 'buffered' | 'streaming'
+  readonly fetch: (request: Request) => Promise<Response>
+}
+
+/** The slice of the Client Connection service a Host plugin can use. */
+export interface ConnectionContext {
+  readonly connection: {
+    readonly fetch: { register(route: FetchRoute): unknown }
+  }
+}
+

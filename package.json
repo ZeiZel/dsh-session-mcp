@@ -1,6 +1,6 @@
 {
   "name": "@nones/dsh-session-mcp",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "MCP server for DeepSeek Harness sessions — list, read and prompt live conversations from any MCP client",
   "type": "module",
   "license": "MIT",
@@ -45,7 +45,11 @@
       "default": "./dist/config.js"
     },
     "./locale/*.json": "./locale/*.json",
-    "./icon": "./icon.svg"
+    "./icon": "./icon.svg",
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    }
   },
   "files": [
     "dist",
@@ -56,8 +60,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.client.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "prepublishOnly": "npm run build"
   },
   "publishConfig": {
@@ -76,6 +80,13 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
     }
   }
 }
