@@ -49,8 +49,13 @@ Restart the harness (or reload the profile) and the endpoint starts with it.
 
 ## Get your config
 
-Open **Settings → MCP** in the harness. The page shows the live endpoint, the bearer
-token (masked until you reveal it), and three copy-ready blocks:
+Open **Settings → MCP** in the harness. The page shows:
+
+- **Status** — listening, uptime, total requests, and the last failure when one happened
+- **Recent requests** — the newest five tool calls: what ran, when, the conversation it
+  addressed, and whether it succeeded (with duration)
+- the live endpoint and the bearer token (masked until you reveal it)
+- three copy-ready blocks:
 
 | Block | For |
 |---|---|
@@ -58,7 +63,11 @@ token (masked until you reveal it), and three copy-ready blocks:
 | Codex — `~/.codex/config.toml` | Codex CLI / IDE |
 | Claude Code — CLI | One `claude mcp add …` command |
 
-Each block has its own **Copy** button; the endpoint and the token have one too.
+Each block has its own **Copy** button; the endpoint and the token have one too. The page
+refreshes every 10 seconds while it is open.
+
+Only the last five calls are kept — the plugin is not a log store, and schema-rejected
+calls (wrong arguments) never reach a tool, so they are not journalled.
 
 The same data is on disk at `$DSH_HOME/state/dsh-session-mcp.json`:
 
