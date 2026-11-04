@@ -1,19 +1,30 @@
 name: release
 
-# Cut a GitHub release and publish to npm when a version tag is pushed.
+# Publish a new version to npm and cut a GitHub release when a version tag is
+# pushed.
 #
-#   git tag v1.2.3 && git push origin v1.2.3
+#   npm version patch --no-git-tag-version   # or edit package.json by hand
+#   git commit -am "chore(release): 1.2.3"
+#   git tag v1.2.3 && git push origin master --tags
 #
-# Requires one repository secret:
+# Required repository secret:
 #   NPM_TOKEN — an npm automation token with publish rights on @nones/dsh-session-mcp.
+#               Create one at https://www.npmjs.com/settings/~/tokens (type: Automation).
 
 on:
   push:
     tags:
       - 'v*'
 
+# Never let two releases race for the same npm version.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
+  # npm provenance: the publish is signed against this workflow run.
+  id-token: write
 
 jobs:
   release:
@@ -47,13 +58,23 @@ jobs:
             exit 1
           fi
 
-      # npm, not bun: bun's publisher stages new versions behind npm's staged
-      # publishing, which leaves a 0.0.0-stage placeholder and blocks the real
-      # version until it is approved.
+      # npm, not bun: bun's publisher goes through npm's staged publishing, which
+      # leaves a 0.0.0-stage placeholder and blocks the real version until it is
+      # approved.
+      - name: Check npm credentials
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::the NPM_TOKEN repository secret is not set — add it in Settings → Secrets and variables → Actions"
+            exit 1
+          fi
+          npm whoami
+
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish
+        run: npm publish --provenance
 
       - name: GitHub release
         env:
