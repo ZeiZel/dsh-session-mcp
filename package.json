@@ -1,6 +1,6 @@
 {
   "name": "@nones/dsh-session-mcp",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "MCP server for DeepSeek Harness sessions — list, read and prompt live conversations from any MCP client",
   "type": "module",
   "license": "MIT",
